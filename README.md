@@ -18,3 +18,12 @@ DQN Basic, time step = 4, 500 reward
 DQN LSTM, time step = 4, 500 reward
 
 ![DQN LSTM](DQN/gifs/test_render_lstm_time_step4_reward500.gif)
+
+DDPG Basic, 222 reward
+
+![DDPG Basic](DQN/gifs/test_render_basic_reward222.gif)
+
+DDPG LSTM, time step = 5, 500 reward
+
+![DDPG LSTM](DDPG/gifs/test_render_lstm_time_step5_reward500.gif)
+

@@ -49,6 +49,7 @@ class DQN:
         self.model = self.create_model()
         self.target_model = self.create_model()
         self.target_model.set_weights(self.model.get_weights())
+
         self.rewards = [0]
         self.q_values = []
 
@@ -137,17 +138,17 @@ class DQN:
             new_state, reward, done, _ = self.env.step(action)  # perform action on env
             modified_reward = 1 - abs(new_state[2] / (np.pi / 2))  # modified for CartPole env, reward based on angle
             prev_stored_states = self.stored_states
-            self.update_states(new_state)
+            self.update_states(new_state)  # update stored states
             self.remember(prev_stored_states, action, modified_reward, self.stored_states, done)
             self.replay()  # iterates default (prediction) model through memory replay
             self.target_update()  # iterates target model
 
-            self.rewards[-1] += reward
+            self.rewards[-1] += reward  # sum reward
             steps += 1
 
         self.save_model("dqn_lstm_final_episode{}_time_step{}.h5".format(episode, self.time_steps))
 
-    def test(self, render=True, fps=30, filename='test_render.mp4'):
+    def test(self, render=True, fps=30, filename='test_render_330.mp4'):
         cur_state, done, rewards = self.env.reset(), False, 0
         video = imageio.get_writer(filename, fps=fps)
         while not done:
