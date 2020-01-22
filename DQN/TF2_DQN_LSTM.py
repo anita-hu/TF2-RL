@@ -2,7 +2,7 @@ import random
 import numpy as np
 import pickle
 import gym
-# import imageio  # write env render to mp4
+import imageio  # write env render to mp4
 from collections import deque
 import matplotlib.pyplot as plt
 import tensorflow as tf
@@ -149,15 +149,15 @@ class DQN:
 
     def test(self, render=True, fps=30, filename='test_render.mp4'):
         cur_state, done, rewards = self.env.reset(), False, 0
-        # video = imageio.get_writer(filename, fps=fps)
+        video = imageio.get_writer(filename, fps=fps)
         while not done:
             action = self.act(test=True)
             new_state, reward, done, _ = self.env.step(action)
             self.update_states(new_state)
             rewards += reward
-            # if render:
-            #     video.append_data(self.env.render(mode='rgb_array'))
-        # video.close()
+            if render:
+                video.append_data(self.env.render(mode='rgb_array'))
+        video.close()
         print("Total rewards: ", rewards)
 
     def plot_q_values(self):
@@ -186,7 +186,9 @@ class DQN:
 if __name__ == "__main__":
     env = gym.make('CartPole-v0')
     env._max_episode_steps = 500
-    dqn_agent = DQN(env, time_steps=5)
+    dqn_agent = DQN(env, time_steps=4)
+    # dqn_agent.load_model("lstm_models/time_step4/dqn_lstm_episode50_time_step4.h5")
+    # dqn_agent.test()
     dqn_agent.train(max_episodes=50)
 
     dqn_agent.plot_q_values()

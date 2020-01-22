@@ -10,3 +10,4 @@ All agents tested using CartPole env with modified reward
 - DDPG (basic and with LSTM model; supports discrete and continuous action space)
 ## Models
 Each agent contain models that were trained for the CartPole env, q value and reward graphs that were generated after training
+## Demos

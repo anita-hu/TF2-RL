@@ -1,7 +1,7 @@
 import random
 import numpy as np
 import gym
-# import imageio  # write env render to mp4
+import imageio  # write env render to mp4
 import pickle
 import matplotlib.pyplot as plt
 from collections import deque
@@ -152,15 +152,15 @@ class DQN:
 
     def test(self, render=True, fps=30, filename='test_render.mp4'):
         cur_state, done, rewards = self.env.reset(), False, 0
-        # video = imageio.get_writer(filename, fps=fps)  # uncomment to save renders to mp4
+        video = imageio.get_writer(filename, fps=fps)  # uncomment to save renders to mp4
         while not done:
             action = self.act(test=True)
             new_state, reward, done, _ = self.env.step(action)
             self.update_states(new_state)
             rewards += reward
-            # if render:
-            #     video.append_data(self.env.render(mode='rgb_array'))
-        # video.close()
+            if render:
+                video.append_data(self.env.render(mode='rgb_array'))
+        video.close()
         print("Total rewards: ", rewards)
 
     def plot_q_values(self, write_txt=True):
@@ -195,7 +195,9 @@ class DQN:
 if __name__ == "__main__":
     env = gym.make('CartPole-v0')
     env._max_episode_steps = 500
-    dqn_agent = DQN(env, time_steps=1)
+    dqn_agent = DQN(env, time_steps=4)
+    # dqn_agent.load_model("basic_models/time_step4/dqn_basic_episode50_time_step4.h5")
+    # dqn_agent.test()
     dqn_agent.train(max_episodes=50)
 
     dqn_agent.plot_q_values()
