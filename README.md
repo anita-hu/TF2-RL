@@ -12,7 +12,9 @@ All agents tested using CartPole env with modified reward
 Each agent contain models that were trained for the CartPole env, q value and reward graphs that were generated after training
 ## Demos
 DQN Basic, time step = 4, 500 reward
+
 ![DQN Basic](DQN/gifs/test_render_basic_time_step4_reward500.gif)
 
 DQN LSTM, time step = 4, 500 reward
+
 ![DQN LSTM](DQN/gifs/test_render_lstm_time_step4_reward500.gif)
