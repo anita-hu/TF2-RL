@@ -9,9 +9,9 @@ All agents tested using CartPole env with modified reward
 
 | Name | On/off policy | Model | Action space support | Exploration method |
 | --- | --- | --- | --- | --- |
-| DQN | off-policy | Dense, LSTM | discrete | e-greedy |
-| DDPG | off-policy | Dense, LSTM | discrete, continuous | Gaussian noise |
-| AE-DDPG | off-policy | Dense | discrete, continuous | Random walk noise |
+| [DQN](https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf) | off-policy | Dense, LSTM | discrete | e-greedy |
+| [DDPG](https://arxiv.org/pdf/1509.02971.pdf) | off-policy | Dense, LSTM | discrete, continuous | Gaussian noise |
+| [AE-DDPG](https://arxiv.org/pdf/1903.00827.pdf) | off-policy | Dense | discrete, continuous | Random walk noise |
 
 ## Models
 Models used to generate the demos are included in the repo, you can also find q value and reward graphs that were generated after training
@@ -24,6 +24,6 @@ Models used to generate the demos are included in the repo, you can also find q 
 | --- | --- |
 | <img src="DDPG/gifs/test_render_basic_reward222.gif" height="200"> | <img src="DDPG/gifs/test_render_lstm_time_step5_reward500.gif" height="200"> |
 
-| DDPG Basic, 222 reward |
+| AE-DDPG Basic, 500 reward |
 | --- |
 | <img src="AE-DDPG/gifs/test_render_basic_reward500.gif" height="200"> |
