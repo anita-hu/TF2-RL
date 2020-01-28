@@ -13,8 +13,6 @@ from tensorflow.keras.optimizers import Adam
 
 '''
 Original paper: https://arxiv.org/pdf/1903.00827.pdf
-TODO:
-- Implement power law noise
 '''
 
 tf.keras.backend.set_floatx('float64')
@@ -71,19 +69,19 @@ class AE_DDPG:
     def __init__(
             self,
             env_name,
-            num_envs=10,
+            num_envs=5,
             discrete=False,
-            lr_actor=3e-4,
-            lr_critic=3e-4,
+            lr_actor=1e-4,
+            lr_critic=1e-3,
             actor_units=(24, 16),
             critic_units=(24, 16),
             sigma=0.4,
             sigma_decay=0.9995,
             tau=0.125,
             gamma=0.85,
-            rho=0.1,
+            rho=0.2,
             batch_size=64,
-            memory_cap=2000,
+            memory_cap=1500,
             hmemory_cap=1000,
             cache_size=500
     ):
@@ -116,7 +114,8 @@ class AE_DDPG:
 
         # Set hyperparameters
         self.sigma = sigma  # stddev for mean-zero gaussian noise
-        self.sigma_decay = sigma_decay  # expotential decay
+        # expotential decay, we take into account it is updated by multiple threads
+        self.sigma_decay = sigma_decay**(1/self.num_envs)
         self.gamma = gamma  # discount factor
         self.tau = tau  # target model update
         self.rho = rho  # chance of sampling from hmemory, paper recommends [0.05, 0.25]
@@ -127,12 +126,11 @@ class AE_DDPG:
         self.q_values = [[]] * self.num_envs
         self.rewards = [[]] * self.num_envs
 
-    def act(self, state, add_noise=True):
+    def act(self, state, random_walk):
         state = np.expand_dims(state, axis=0).astype(np.float32)
         a = self.actor.predict(state)
-        # add mean-zero Gaussian noise
-        a += tf.random.normal(shape=a.shape, mean=0., stddev=self.sigma * float(add_noise),
-                              dtype=tf.float32) * self.action_bound
+        # add random walk noise
+        a += random_walk * self.action_bound
         a = tf.clip_by_value(a, -self.action_bound, self.action_bound)
 
         q_val = self.critic.predict([state, a])
@@ -174,9 +172,6 @@ class AE_DDPG:
         return samples
 
     def replay(self):
-        if len(self.memory) < self.batch_size:
-            return
-
         samples = self.sample_batch()
         batch_y = []
         batch_states = []
@@ -205,9 +200,9 @@ class AE_DDPG:
 
     def async_collection(self, index):
         while True:
-            done, cur_state, total_reward = False, self.env[index].reset(), 0
+            done, cur_state, total_reward, rand_walk_noise = False, self.env[index].reset(), 0, 0
             while not done:
-                a, q_val = self.act(cur_state)  # model determine action given state
+                a, q_val = self.act(cur_state, rand_walk_noise)  # model determine action given state
                 action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
                 next_state, reward, done, _ = self.env[index].step(action)  # perform action on env
                 modified_reward = 1 - abs(
@@ -218,6 +213,7 @@ class AE_DDPG:
 
                 cur_state = next_state
                 total_reward += reward
+                rand_walk_noise += tf.random.normal(shape=a.shape, mean=0., stddev=self.sigma, dtype=tf.float32)
                 self.q_values[index].append(q_val)
 
             self.rewards[index].append(total_reward)
@@ -231,29 +227,30 @@ class AE_DDPG:
     def train(self, max_epochs=8000, save_freq=50):
         collection_threads, epoch = [], 0
         self.actor._make_predict_function()  # from https://github.com/jaromiru/AI-blog/issues/2
+        print("-- starting threads --")
         for i in range(self.num_envs):
             t = threading.Thread(target=self.async_collection, args=(i, ), daemon=True)
             t.start()
             collection_threads.append(t)
 
-        last_state = self.memory[-1][0] if len(self.memory) else []
+        print("-- waiting for first batch of data --")
         while is_threads_alive(collection_threads) and epoch < max_epochs:
-            curr_state = self.memory[-1][0] if len(self.memory) else []
-            if not np.array_equal(curr_state, last_state):
-                self.replay()  # train models through memory replay
+            if len(self.memory) < self.batch_size:
+                continue
 
-                update_target_weights(self.actor, self.actor_target, tau=self.tau)  # iterates target model
-                update_target_weights(self.critic, self.critic_target, tau=self.tau)
+            self.replay()  # train models through memory replay
+            update_target_weights(self.actor, self.actor_target, tau=self.tau)  # iterates target model
+            update_target_weights(self.critic, self.critic_target, tau=self.tau)
 
-                epoch += 1
-                print("epoch {}: {} max reward, {} sigma".format(epoch, self.max_reward, self.sigma))
-
-                last_state = curr_state
+            epoch += 1
+            print("train epoch {}: {} max reward, {} q value, {} sigma".format(epoch, self.max_reward,
+                                                                               self.q_values[0][-1], self.sigma))
 
             if epoch % save_freq == 0:
                 self.save_model("ddpg_actor_epoch{}.h5".format(epoch),
                                 "ddpg_critic_epoch{}.h5".format(epoch))
 
+        print("-- saving final model --")
         self.save_model("ddpg_actor_final_epoch{}.h5".format(max_epochs),
                         "ddpg_critic_final_epoch{}.h5".format(max_epochs))
 
@@ -261,7 +258,7 @@ class AE_DDPG:
         cur_state, done, rewards = self.env[0].reset(), False, 0
         video = imageio.get_writer(filename, fps=fps)
         while not done:
-            a, _ = self.act(cur_state, add_noise=False)
+            a, _ = self.act(cur_state, 0)
             action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
             next_state, reward, done, _ = self.env[0].step(action)
             cur_state = next_state
@@ -309,7 +306,7 @@ if __name__ == "__main__":
     ddpg = AE_DDPG(name, discrete=is_discrete)
     # ddpg.load_critic("ddpg_critic_epoch950.h5")
     # ddpg.load_actor("ddpg_actor_epoch950.h5")
-    ddpg.train(max_epochs=10)
+    ddpg.train(max_epochs=5000)
     # ddpg.test()
     ddpg.plot_rewards()
     ddpg.plot_q_values()
