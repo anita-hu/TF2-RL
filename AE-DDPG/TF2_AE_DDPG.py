@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 from collections import deque
 import threading
+import time
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.models import Model, load_model, clone_model
@@ -71,8 +72,8 @@ class AE_DDPG:
             env_name,
             num_envs=5,
             discrete=False,
-            lr_actor=1e-4,
-            lr_critic=1e-3,
+            lr_actor=4e-4,
+            lr_critic=4e-3,
             actor_units=(24, 16),
             critic_units=(24, 16),
             sigma=0.4,
@@ -224,7 +225,7 @@ class AE_DDPG:
                     transitions = self.cache_buffer[index].pop()
                     self.store_memory(*transitions, hmemory=True)
 
-    def train(self, max_epochs=8000, save_freq=50):
+    def train(self, max_epochs=8000, save_freq=100):
         collection_threads, epoch = [], 0
         self.actor._make_predict_function()  # from https://github.com/jaromiru/AI-blog/issues/2
         print("-- starting threads --")
@@ -235,6 +236,7 @@ class AE_DDPG:
 
         print("-- waiting for first batch of data --")
         while is_threads_alive(collection_threads) and epoch < max_epochs:
+            start = time.time()
             if len(self.memory) < self.batch_size:
                 continue
 
@@ -243,16 +245,17 @@ class AE_DDPG:
             update_target_weights(self.critic, self.critic_target, tau=self.tau)
 
             epoch += 1
-            print("train epoch {}: {} max reward, {} q value, {} sigma".format(epoch, self.max_reward,
-                                                                               self.q_values[0][-1], self.sigma))
-
             if epoch % save_freq == 0:
-                self.save_model("ddpg_actor_epoch{}.h5".format(epoch),
-                                "ddpg_critic_epoch{}.h5".format(epoch))
+                self.save_model("aeddpg_actor_epoch{}.h5".format(epoch),
+                                "aeddpg_critic_epoch{}.h5".format(epoch))
+
+            dt = time.time() - start
+            print("train epoch {}: {} reward, {} q value, {} sigma, {} seconds".format(
+                epoch, self.rewards[0][-1], self.q_values[0][-1], self.sigma, dt))
 
         print("-- saving final model --")
-        self.save_model("ddpg_actor_final_epoch{}.h5".format(max_epochs),
-                        "ddpg_critic_final_epoch{}.h5".format(max_epochs))
+        self.save_model("aeddpg_actor_final_epoch{}.h5".format(max_epochs),
+                        "aeddpg_critic_final_epoch{}.h5".format(max_epochs))
 
     def test(self, render=True, fps=30, filename='test_render.mp4'):
         cur_state, done, rewards = self.env[0].reset(), False, 0
@@ -304,9 +307,9 @@ if __name__ == "__main__":
         print('Discrete Action Space')
 
     ddpg = AE_DDPG(name, discrete=is_discrete)
-    # ddpg.load_critic("ddpg_critic_epoch950.h5")
-    # ddpg.load_actor("ddpg_actor_epoch950.h5")
-    ddpg.train(max_epochs=5000)
-    # ddpg.test()
-    ddpg.plot_rewards()
-    ddpg.plot_q_values()
+    ddpg.load_critic("basic_models/ddpg_critic_epoch2250.h5")
+    ddpg.load_actor("basic_models/ddpg_actor_epoch2250.h5")
+    # ddpg.train(max_epochs=2000)
+    ddpg.test()
+    # ddpg.plot_rewards()
+    # ddpg.plot_q_values()

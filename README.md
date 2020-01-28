@@ -23,3 +23,7 @@ Models used to generate the demos are included in the repo, you can also find q 
 | DDPG Basic, 222 reward | DDPG LSTM, time step = 5, 500 reward |
 | --- | --- |
 | <img src="DDPG/gifs/test_render_basic_reward222.gif" height="200"> | <img src="DDPG/gifs/test_render_lstm_time_step5_reward500.gif" height="200"> |
+
+| DDPG Basic, 222 reward |
+| --- |
+| <img src="AE-DDPG/gifs/test_render_basic_reward500.gif" height="200"> |
