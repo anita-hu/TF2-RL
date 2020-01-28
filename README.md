@@ -6,9 +6,13 @@ Implemented for Tensorflow 2.0+ (use version 2.1 to avoid memory leak issues)
 - Example: `python3 TF2_DQN_LSTM.py`
 ## Agents
 All agents tested using CartPole env with modified reward
-- DQN (basic and with LSTM model)
-- DDPG (basic and with LSTM model; supports discrete and continuous action space)
-- AE-DDPG (basic model; work in progress)
+
+| Name | On/off policy | Model | Action space support | Exploration method |
+| --- | --- | --- | --- | --- |
+| DQN | off-policy | Dense, LSTM | discrete | e-greedy |
+| DDPG | off-policy | Dense, LSTM | discrete, continuous | Gaussian noise |
+| AE-DDPG | off-policy | Dense | discrete, continuous | Random walk noise |
+
 ## Models
 Models used to generate the demos are included in the repo, you can also find q value and reward graphs that were generated after training
 ## Demos
