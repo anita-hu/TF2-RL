@@ -72,16 +72,16 @@ class AE_DDPG:
             env_name,
             num_envs=5,
             discrete=False,
-            lr_actor=4e-4,
+            lr_actor=1e-4,
             lr_critic=4e-3,
-            actor_units=(24, 16),
-            critic_units=(24, 16),
+            actor_units=(12, 8),
+            critic_units=(12, 8),
             sigma=0.4,
             sigma_decay=0.9995,
             tau=0.125,
             gamma=0.85,
             rho=0.2,
-            batch_size=64,
+            batch_size=128,
             memory_cap=1500,
             hmemory_cap=1000,
             cache_size=500
@@ -307,9 +307,9 @@ if __name__ == "__main__":
         print('Discrete Action Space')
 
     ddpg = AE_DDPG(name, discrete=is_discrete)
-    ddpg.load_critic("basic_models/ddpg_critic_epoch2250.h5")
-    ddpg.load_actor("basic_models/ddpg_actor_epoch2250.h5")
-    # ddpg.train(max_epochs=2000)
+    ddpg.load_critic("basic_models/aeddpg_critic_epoch2300.h5")
+    ddpg.load_actor("basic_models/aeddpg_actor_epoch2300.h5")
+    # ddpg.train(max_epochs=2500)
     ddpg.test()
     # ddpg.plot_rewards()
     # ddpg.plot_q_values()
