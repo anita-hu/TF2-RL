@@ -4,6 +4,10 @@ Implemented for Tensorflow 2.0+ (use version 2.1 to avoid memory leak issues)
 - Install dependancies imported in python file (including tensorflow 2.0+, gym, numpy, matplotlib)
 - Each file contains example code that runs training on CartPole env
 - Example: `python3 TF2_DQN_LSTM.py`
+## Hyperparameter tuning
+- Install hyperopt https://github.com/hyperopt/hyperopt
+- Optional: switch agent used and configure param space in `hyperparam_tune.py` 
+- Run: `python3 hyperparam_tune.py`
 ## Agents
 All agents tested using CartPole env with modified reward
 
