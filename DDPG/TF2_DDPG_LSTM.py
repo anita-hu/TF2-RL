@@ -231,7 +231,7 @@ class DDPG:
             if render:
                 video.append_data(self.env.render(mode='rgb_array'))
         video.close()
-        print("Total rewards: ", rewards)
+        return rewards
 
     def plot_rewards(self):
         file = open('rewards.txt', 'wb')
@@ -271,6 +271,7 @@ if __name__ == "__main__":
     # ddpg.load_critic("lstm_models/time_step5/ddpg_critic_final_episode215.h5")
     # ddpg.load_actor("lstm_models/time_step5/ddpg_actor_final_episode215.h5")
     ddpg.train(max_episodes=50)
-    # ddpg.test()
+    # rewards = ddpg.test()
+    # print("Total rewards: ", rewards)
     ddpg.plot_rewards()
     ddpg.plot_q_values()

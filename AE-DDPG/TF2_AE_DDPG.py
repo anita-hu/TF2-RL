@@ -269,7 +269,7 @@ class AE_DDPG:
             if render:
                 video.append_data(self.env[0].render(mode='rgb_array'))
         video.close()
-        print("Total rewards: ", rewards)
+        return rewards
 
     def plot_rewards(self):
         file = open('rewards.txt', 'wb')
@@ -310,6 +310,7 @@ if __name__ == "__main__":
     ddpg.load_critic("basic_models/aeddpg_critic_epoch2300.h5")
     ddpg.load_actor("basic_models/aeddpg_actor_epoch2300.h5")
     # ddpg.train(max_epochs=2500)
-    ddpg.test()
+    rewards = ddpg.test()
+    print("Total rewards: ", rewards)
     # ddpg.plot_rewards()
     # ddpg.plot_q_values()

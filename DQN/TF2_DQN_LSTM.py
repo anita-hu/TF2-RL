@@ -159,7 +159,7 @@ class DQN:
             if render:
                 video.append_data(self.env.render(mode='rgb_array'))
         video.close()
-        print("Total rewards: ", rewards)
+        return rewards
 
     def plot_q_values(self):
         file = open('q_values_{}_states.txt'.format(self.time_steps), 'wb')
@@ -189,7 +189,8 @@ if __name__ == "__main__":
     env._max_episode_steps = 500
     dqn_agent = DQN(env, time_steps=4)
     # dqn_agent.load_model("lstm_models/time_step4/dqn_lstm_episode50_time_step4.h5")
-    # dqn_agent.test()
+    # rewards = dqn_agent.test()
+    # print("Total rewards: ", rewards)
     dqn_agent.train(max_episodes=50)
 
     dqn_agent.plot_q_values()
