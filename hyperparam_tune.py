@@ -14,10 +14,10 @@ space = {
     'critic_lr': hp.loguniform('c_lr', np.log(1e-6), np.log(1e-2)),
     'sigma_decay': 1 - hp.loguniform('s_decay', np.log(1e-5), np.log(1e-2)),
     # 'batch_size': hp.choice('bs', [32, 64, 128]),
-    'actor_dense_1': hp.choice('a_L1', range(1, 48)),
-    'actor_dense_2': hp.choice('a_L2', range(1, 36)),
-    'critic_dense_1': hp.choice('c_L1', range(1, 48)),
-    'critic_dense_2': hp.choice('c_L2', range(1, 36)),
+    # 'actor_dense_1': hp.choice('a_L1', range(1, 48)),
+    # 'actor_dense_2': hp.choice('a_L2', range(1, 36)),
+    # 'critic_dense_1': hp.choice('c_L1', range(1, 48)),
+    # 'critic_dense_2': hp.choice('c_L2', range(1, 36)),
 }
 
 
@@ -29,10 +29,10 @@ def f(params, test_trials=5):
                    lr_actor=params['actor_lr'],
                    lr_critic=params['critic_lr'],
                    sigma_decay=params['sigma_decay'],
-                   actor_units=(params['actor_dense_1'], params['actor_dense_2']),
-                   critic_units=(params['critic_dense_1'], params['critic_dense_2'])
+                   # actor_units=(params['actor_dense_1'], params['actor_dense_2']),
+                   # critic_units=(params['critic_dense_1'], params['critic_dense_2'])
                    )
-    ddpg.train(max_epochs=1600)
+    ddpg.train(max_epochs=1600, save_freq=1000)
     total_loss = 0
     for i in range(test_trials):
         rewards = ddpg.test(render=False)
@@ -43,5 +43,5 @@ def f(params, test_trials=5):
 
 if __name__ == "__main__":
     trials = Trials()
-    best = fmin(f, space, algo=tpe.suggest, max_evals=1, trials=trials)
+    best = fmin(f, space, algo=tpe.suggest, max_evals=10, trials=trials)
     print("Best: ", space_eval(space, best))

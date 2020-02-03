@@ -6,7 +6,7 @@ import numpy as np
 from collections import deque
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from tensorflow.keras.models import Model, load_model, clone_model
+from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, LSTM, Lambda, Concatenate
 from tensorflow.keras.optimizers import Adam
 
@@ -20,7 +20,7 @@ TODO: improvements
 tf.keras.backend.set_floatx('float64')
 
 
-def actor(input_shape, action_dim, action_bound, units=(24, 16), num_actions=1):
+def actor(input_shape, action_dim, action_bound, action_shift, units=(24, 16), num_actions=1):
     states = Input(shape=input_shape)
     state_features = LSTM(units[0], name="state_lstm", activation="tanh")(states)
     x = Dense(units[1], name="fc1", activation='relu')(state_features)
@@ -30,7 +30,8 @@ def actor(input_shape, action_dim, action_bound, units=(24, 16), num_actions=1):
         unscaled_output = Dense(action_dim, name="output{}".format(i), activation='relu')(x)
         scalar = action_bound * np.ones(action_dim)
         output = Lambda(lambda op: op * scalar)(unscaled_output)
-        # output = Lambda(lambda op: op + shift)(output)  # for action range not centered at zero
+        if np.sum(action_shift) != 0:
+            output = Lambda(lambda op: op + action_shift)(output)  # for action range not centered at zero
         outputs.append(output)
 
     model = Model(inputs=states, outputs=outputs)
@@ -84,14 +85,13 @@ class DDPG:
         input_shape = (self.time_steps, self.state_shape[0])
         self.stored_states = np.zeros(input_shape)
         self.discrete = discrete
-        # action bound assumes range is centered at zero (e.g. -10 to 10)
-        # add another layer at the end of the actor model to shift action values if it is not centered at zero
-        self.action_bound = env.action_space.high if not discrete else 1.
+        self.action_bound = (env.action_space.high - env.action_space.low) / 2 if not discrete else 1.
+        self.action_shift = (env.action_space.high + env.action_space.low) / 2 if not discrete else 0.
         self.memory = deque(maxlen=memory_cap)
 
         # Define and initialize Actor network
-        self.actor = actor(input_shape, self.action_dim, self.action_bound, actor_units)
-        self.actor_target = actor(input_shape, self.action_dim, self.action_bound, actor_units)
+        self.actor = actor(input_shape, self.action_dim, self.action_bound, self.action_shift, actor_units)
+        self.actor_target = actor(input_shape, self.action_dim, self.action_bound, self.action_shift, actor_units)
         self.actor_optimizer = Adam(learning_rate=lr_actor)
         update_target_weights(self.actor, self.actor_target, tau=1.)
 
@@ -125,6 +125,7 @@ class DDPG:
         a += tf.random.normal(shape=a.shape, mean=0., stddev=self.sigma * float(add_noise),
                               dtype=tf.float32) * self.action_bound
         a = tf.clip_by_value(a, -self.action_bound, self.action_bound)
+        a += self.action_shift
 
         q_val = self.critic.predict([states, a])
         self.q_values.append(q_val[0][0])

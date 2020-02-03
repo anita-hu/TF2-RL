@@ -8,7 +8,7 @@ import threading
 import time
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from tensorflow.keras.models import Model, load_model, clone_model
+from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, Lambda, Concatenate
 from tensorflow.keras.optimizers import Adam
 
@@ -19,7 +19,7 @@ Original paper: https://arxiv.org/pdf/1903.00827.pdf
 tf.keras.backend.set_floatx('float64')
 
 
-def actor(state_shape, action_dim, action_bound, units=(400, 300), num_actions=1):
+def actor(state_shape, action_dim, action_bound, action_shift, units=(400, 300), num_actions=1):
     state = Input(shape=state_shape)
     x = Dense(units[0], name="L1", activation='relu')(state)
     x = Dense(units[1], name="L2", activation='relu')(x)
@@ -29,7 +29,8 @@ def actor(state_shape, action_dim, action_bound, units=(400, 300), num_actions=1
         unscaled_output = Dense(action_dim, name="L{}".format(i), activation='tanh')(x)
         scalar = action_bound * np.ones(action_dim)
         output = Lambda(lambda op: op * scalar)(unscaled_output)
-        # output = Lambda(lambda op: op + shift)(output)  # for action range not centered at zero
+        if np.sum(action_shift) != 0:
+            output = Lambda(lambda op: op + action_shift)(output)  # for action range not centered at zero
         outputs.append(output)
 
     model = Model(inputs=state, outputs=outputs)
@@ -91,9 +92,8 @@ class AE_DDPG:
         self.state_shape = self.env[0].observation_space.shape  # shape of observations
         self.action_dim = self.env[0].action_space.n  # number of actions
         self.discrete = discrete
-        # action bound assumes range is centered at zero (e.g. -10 to 10)
-        # add another layer at the end of the actor model to shift action values if it is not centered at zero
-        self.action_bound = self.env[0].action_space.high if not discrete else 1.
+        self.action_bound = (self.env[0].action_space.high - self.env[0].action_space.low) / 2 if not discrete else 1.
+        self.action_shift = (self.env[0].action_space.high + self.env[0].action_space.low) / 2 if not discrete else 0.
 
         # Initialize memory buffers
         self.memory = deque(maxlen=memory_cap)
@@ -101,8 +101,8 @@ class AE_DDPG:
         self.cache_buffer = [deque(maxlen=cache_size) for i in range(num_envs)]
 
         # Define and initialize Actor network
-        self.actor = actor(self.state_shape, self.action_dim, self.action_bound, actor_units)
-        self.actor_target = actor(self.state_shape, self.action_dim, self.action_bound, actor_units)
+        self.actor = actor(self.state_shape, self.action_dim, self.action_bound, self.action_shift, actor_units)
+        self.actor_target = actor(self.state_shape, self.action_dim, self.action_bound, self.action_shift, actor_units)
         self.actor_optimizer = Adam(learning_rate=lr_actor)
         update_target_weights(self.actor, self.actor_target, tau=1.)
 
@@ -133,6 +133,7 @@ class AE_DDPG:
         # add random walk noise
         a += random_walk * self.action_bound
         a = tf.clip_by_value(a, -self.action_bound, self.action_bound)
+        a += self.action_shift
 
         q_val = self.critic.predict([state, a])
         self.sigma *= self.sigma_decay
