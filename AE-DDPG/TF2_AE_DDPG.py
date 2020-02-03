@@ -132,8 +132,7 @@ class AE_DDPG:
         a = self.actor.predict(state)
         # add random walk noise
         a += random_walk * self.action_bound
-        a = tf.clip_by_value(a, -self.action_bound, self.action_bound)
-        a += self.action_shift
+        a = tf.clip_by_value(a, -self.action_bound + self.action_shift, self.action_bound + self.action_shift)
 
         q_val = self.critic.predict([state, a])
         self.sigma *= self.sigma_decay

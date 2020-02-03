@@ -124,8 +124,7 @@ class DDPG:
         # add mean-zero Gaussian noise
         a += tf.random.normal(shape=a.shape, mean=0., stddev=self.sigma * float(add_noise),
                               dtype=tf.float32) * self.action_bound
-        a = tf.clip_by_value(a, -self.action_bound, self.action_bound)
-        a += self.action_shift
+        a = tf.clip_by_value(a, -self.action_bound + self.action_shift, self.action_bound + self.action_shift)
 
         q_val = self.critic.predict([states, a])
         self.q_values.append(q_val[0][0])
