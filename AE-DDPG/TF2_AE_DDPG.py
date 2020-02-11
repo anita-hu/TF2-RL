@@ -174,27 +174,19 @@ class AE_DDPG:
 
     def replay(self):
         samples = self.sample_batch()
-        batch_y = []
-        batch_states = []
-        batch_target_actions = []
-        for sample in samples:  # calculate target y for each sample
-            state, action, reward, next_state, done = sample
-            next_action = self.actor_target.predict(next_state)
-            q_future = self.critic_target.predict([next_state, next_action])[0]
-            y = reward + q_future * self.gamma * (1. - done)
-            batch_states.append(state[0])
-            batch_y.append(y)
-            batch_target_actions.append(action[0])
+        s = np.array(samples).T
+        states, actions, rewards, next_states, dones = [np.vstack(s[i, :]).astype(np.float) for i in range(5)]
+        next_actions = self.actor_target.predict(next_states)
+        q_future = self.critic_target.predict([next_states, next_actions])
+        target_qs = rewards + q_future * self.gamma * (1. - dones)
 
         # train critic
-        batch_states = np.array(batch_states)
-        self.critic.fit([batch_states, np.array(batch_target_actions)], np.array(batch_y), epochs=1,
-                        batch_size=self.batch_size, verbose=0)
+        self.critic.fit([states, actions], target_qs, epochs=1, batch_size=self.batch_size, verbose=0)
 
         # train actor
         with tf.GradientTape() as tape:
-            actions = self.actor(batch_states)
-            actor_loss = -tf.reduce_mean(self.critic([batch_states, actions]))
+            actions = self.actor(states)
+            actor_loss = -tf.reduce_mean(self.critic([states, actions]))
 
         actor_grad = tape.gradient(actor_loss, self.actor.trainable_variables)  # compute actor gradient
         self.actor_optimizer.apply_gradients(zip(actor_grad, self.actor.trainable_variables))
@@ -307,10 +299,10 @@ if __name__ == "__main__":
         print('Discrete Action Space')
 
     ddpg = AE_DDPG(name, discrete=is_discrete)
-    ddpg.load_critic("basic_models/aeddpg_critic_epoch2300.h5")
-    ddpg.load_actor("basic_models/aeddpg_actor_epoch2300.h5")
-    # ddpg.train(max_epochs=2500)
-    rewards = ddpg.test()
-    print("Total rewards: ", rewards)
-    # ddpg.plot_rewards()
-    # ddpg.plot_q_values()
+    # ddpg.load_critic("basic_models/aeddpg_critic_epoch2300.h5")
+    # ddpg.load_actor("basic_models/aeddpg_actor_epoch2300.h5")
+    ddpg.train(max_epochs=2500)
+    # rewards = ddpg.test()
+    # print("Total rewards: ", rewards)
+    ddpg.plot_rewards()
+    ddpg.plot_q_values()
