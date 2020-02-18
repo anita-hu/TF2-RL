@@ -1,10 +1,9 @@
 import gym
 import random
 import imageio
-import pickle
+import datetime
 import numpy as np
 from collections import deque
-import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, LSTM, Lambda, Concatenate
@@ -22,9 +21,10 @@ tf.keras.backend.set_floatx('float64')
 
 def actor(input_shape, action_dim, action_bound, action_shift, units=(24, 16), num_actions=1):
     states = Input(shape=input_shape)
-    state_features = LSTM(units[0], name="state_lstm", activation="tanh")(states)
-    x = Dense(units[1], name="fc1", activation='relu')(state_features)
-    # x = Dense(units[2], name="fc2", activation='relu')(x)
+    x = LSTM(units[0], name="state_lstm", activation="tanh")(states)
+    for index in range(1, len(units)):
+        x = Dense(units[index], name="fc{}".format(index), activation='relu')(x)
+
     outputs = []  # for loop for discrete-continuous action space
     for i in range(num_actions):
         unscaled_output = Dense(action_dim, name="output{}".format(i), activation='relu')(x)
@@ -46,7 +46,8 @@ def critic(input_shape, action_dim, units=(24, 16), num_actions=1):
     state_features = LSTM(units[0], name="state_lstm", activation="tanh")(inputs[0])
     concat = Concatenate(axis=-1)([state_features]+inputs[1:])
     x = Dense(units[1], name="fc1", activation='relu')(concat)
-    # x = Dense(units[2], name="fc2", activation='relu')(x)
+    for index in range(2, len(units)):
+        x = Dense(units[index], name="fc{}".format(index), activation='relu')(x)
     output = Dense(1, name="output")(x)
     model = Model(inputs=inputs, outputs=output)
 
@@ -81,7 +82,7 @@ class DDPG:
         self.env = env
         self.state_shape = env.observation_space.shape  # shape of observations
         self.time_steps = time_steps  # number of states (current + past) as input
-        self.action_dim = env.action_space.n  # number of actions
+        self.action_dim = env.action_space.n if discrete else env.action_space.shape[0]  # number of actions
         input_shape = (self.time_steps, self.state_shape[0])
         self.stored_states = np.zeros(input_shape)
         self.discrete = discrete
@@ -109,9 +110,11 @@ class DDPG:
         self.tau = tau  # target model update
         self.batch_size = batch_size
 
-        # Training log
-        self.rewards = [0]
-        self.q_values = []
+        # Tensorboard
+        current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        train_log_dir = 'logs/DDPG_lstm/' + current_time
+        self.summary_writer = tf.summary.create_file_writer(train_log_dir)
+        self.summaries = {}
 
     def update_states(self, new_state):
         # move the oldest state to the end of array and replace with new state
@@ -127,10 +130,9 @@ class DDPG:
         a = tf.clip_by_value(a, -self.action_bound + self.action_shift, self.action_bound + self.action_shift)
 
         q_val = self.critic.predict([states, a])
-        self.q_values.append(q_val[0][0])
         self.sigma *= self.sigma_decay
 
-        return a
+        return a, q_val[0][0]
 
     def save_model(self, a_fn, c_fn):
         self.actor.save(a_fn)
@@ -163,7 +165,7 @@ class DDPG:
         target_qs = rewards + q_future * self.gamma * (1. - dones)
 
         # train critic
-        self.critic.fit([states, actions], target_qs, epochs=1, batch_size=self.batch_size, verbose=0)
+        hist = self.critic.fit([states, actions], target_qs, epochs=1, batch_size=self.batch_size, verbose=0)
 
         # train actor
         with tf.GradientTape() as tape:
@@ -173,8 +175,14 @@ class DDPG:
         actor_grad = tape.gradient(actor_loss, self.actor.trainable_variables)  # compute actor gradient
         self.actor_optimizer.apply_gradients(zip(actor_grad, self.actor.trainable_variables))
 
-    def train(self, max_episodes=50, max_epochs=8000, max_steps=500, resume_episode=0, save_freq=50):
-        done, episode, cur_state, steps, epoch = False, resume_episode, self.env.reset(), 0, 0
+        # tensorboard info
+        self.summaries['critic_loss'] = np.mean(hist.history['loss'])
+        self.summaries['actor_loss'] = actor_loss
+
+    def train(self, max_episodes=50, max_epochs=8000, max_steps=500, save_freq=50):
+        done, episode, steps, epoch = False, 0, 0, 0
+        cur_state = self.env.reset()
+        self.update_states(cur_state)  # update stored states
         while episode < max_episodes or epoch < max_epochs:
             if steps >= max_steps:
                 print("episode {}, reached max steps".format(episode))
@@ -183,15 +191,13 @@ class DDPG:
 
             if done:
                 episode += 1
-                print("episode {}: {} reward, {} q value, {} sigma, {} epochs".format(
-                    episode, self.rewards[-1], self.q_values[-steps], self.sigma, epoch))
+                print("episode {}: {} sigma, {} epochs".format(episode, self.sigma, epoch))
                 done, cur_state, steps = False, self.env.reset(), 0
-                self.rewards.append(0)
                 if episode % save_freq == 0:
                     self.save_model("ddpg_actor_episode{}.h5".format(episode),
                                     "ddpg_critic_episode{}.h5".format(episode))
 
-            a = self.act()  # model determine action, states taken from self.stored_states
+            a, q_val = self.act()  # model determine action, states taken from self.stored_states
             action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
             next_state, reward, done, _ = self.env.step(action)  # perform action on env
             modified_reward = 1 - abs(next_state[2] / (np.pi / 2))  # modified for CartPole env, reward based on angle
@@ -204,9 +210,19 @@ class DDPG:
             update_target_weights(self.actor, self.actor_target, tau=self.tau)  # iterates target model
             update_target_weights(self.critic, self.critic_target, tau=self.tau)
 
-            self.rewards[-1] += reward  # sum reward
             steps += 1
             epoch += 1
+
+            # Tensorboard update
+            with self.summary_writer.as_default():
+                if self.summaries:
+                    tf.summary.scalar('Loss/actor_loss', self.summaries['actor_loss'], step=epoch)
+                    tf.summary.scalar('Loss/critic_loss', self.summaries['critic_loss'], step=epoch)
+                tf.summary.scalar('Stats/reward', reward, step=epoch)
+                tf.summary.scalar('Stats/q_val', q_val, step=epoch)
+                tf.summary.scalar('Stats/sigma', self.sigma, step=epoch)
+
+            self.summary_writer.flush()
 
         self.save_model("ddpg_actor_final_episode{}.h5".format(episode),
                         "ddpg_critic_final_episode{}.h5".format(episode))
@@ -215,7 +231,7 @@ class DDPG:
         cur_state, done, rewards = self.env.reset(), False, 0
         video = imageio.get_writer(filename, fps=fps)
         while not done:
-            a = self.act(add_noise=False)
+            a, _ = self.act(add_noise=False)
             action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
             next_state, reward, done, _ = self.env.step(action)
             self.update_states(next_state)
@@ -224,28 +240,6 @@ class DDPG:
                 video.append_data(self.env.render(mode='rgb_array'))
         video.close()
         return rewards
-
-    def plot_rewards(self):
-        file = open('rewards.txt', 'wb')
-        pickle.dump(self.rewards, file)
-        file.close()
-
-        plt.clf()
-        plt.plot(self.rewards[:-1], label="Reward")
-        plt.legend(loc="upper right")
-        # plt.show()
-        plt.savefig('rewards.png', bbox_inches='tight')
-
-    def plot_q_values(self):
-        file = open('q_values.txt', 'wb')
-        pickle.dump(self.q_values, file)
-        file.close()
-
-        plt.clf()
-        plt.plot(self.q_values, label="Q value")
-        plt.legend(loc="upper right")
-        # plt.show()
-        plt.savefig('q_values.png', bbox_inches='tight')
 
 
 if __name__ == "__main__":
@@ -265,5 +259,4 @@ if __name__ == "__main__":
     ddpg.train(max_episodes=50)
     # rewards = ddpg.test()
     # print("Total rewards: ", rewards)
-    ddpg.plot_rewards()
-    ddpg.plot_q_values()
+

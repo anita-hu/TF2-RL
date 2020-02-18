@@ -21,9 +21,10 @@ tf.keras.backend.set_floatx('float64')
 
 def actor(state_shape, action_dim, action_bound, action_shift, units=(400, 300), num_actions=1):
     state = Input(shape=state_shape)
-    x = Dense(units[0], name="L1", activation='relu')(state)
-    x = Dense(units[1], name="L2", activation='relu')(x)
-    # x = Dense(units[2], name="L3", activation='relu')(x)
+    x = Dense(units[0], name="L0", activation='relu')(state)
+    for index in range(1, len(units)):
+        x = Dense(units[index], name="L{}".format(index), activation='relu')(x)
+
     outputs = []  # for loop for discrete-continuous action space
     for i in range(num_actions):
         unscaled_output = Dense(action_dim, name="L{}".format(i), activation='tanh')(x)
@@ -43,10 +44,10 @@ def critic(state_shape, action_dim, units=(48, 24), num_actions=1):
     for i in range(num_actions):  # for loop for discrete-continuous action space
         inputs.append(Input(shape=(action_dim,)))
     concat = Concatenate(axis=-1)(inputs)
-    x = Dense(units[0], name="L1", activation='relu')(concat)
-    x = Dense(units[1], name="L2", activation='relu')(x)
-    # x = Dense(units[2], name="L3", activation='relu')(x)
-    output = Dense(1, name="L4")(x)
+    x = Dense(units[0], name="L0", activation='relu')(concat)
+    for index in range(1, len(units)):
+        x = Dense(units[index], name="L{}".format(index), activation='relu')(x)
+    output = Dense(1, name="Out")(x)
     model = Model(inputs=inputs, outputs=output)
 
     return model
@@ -263,28 +264,6 @@ class AE_DDPG:
         video.close()
         return rewards
 
-    def plot_rewards(self):
-        file = open('rewards.txt', 'wb')
-        pickle.dump(self.rewards, file)
-        file.close()
-
-        plt.clf()
-        plt.plot(self.rewards[0], label="Reward")
-        plt.legend(loc="upper right")
-        # plt.show()
-        plt.savefig('rewards.png', bbox_inches='tight')
-
-    def plot_q_values(self):
-        file = open('q_values.txt', 'wb')
-        pickle.dump(self.q_values, file)
-        file.close()
-
-        plt.clf()
-        plt.plot(self.q_values[0], label="Q value")
-        plt.legend(loc="upper right")
-        # plt.show()
-        plt.savefig('q_values.png', bbox_inches='tight')
-
 
 if __name__ == "__main__":
     name = "CartPole-v1"
@@ -304,5 +283,3 @@ if __name__ == "__main__":
     ddpg.train(max_epochs=2500)
     # rewards = ddpg.test()
     # print("Total rewards: ", rewards)
-    ddpg.plot_rewards()
-    ddpg.plot_q_values()

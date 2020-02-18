@@ -118,8 +118,8 @@ class DQN:
         self.target_model = self.create_model()
         self.target_model.set_weights(self.model.get_weights())
 
-    def train(self, max_episodes=10, max_steps=500, resume_episode=0, save_freq=10):
-        done, episode, steps = True, resume_episode, 0
+    def train(self, max_episodes=10, max_steps=500, save_freq=10):
+        done, episode, steps = True, 0, 0
         while episode < max_episodes:
             if steps >= max_steps:
                 print("episode {}, reached max steps".format(episode))
@@ -128,6 +128,7 @@ class DQN:
             if done:
                 self.stored_states = np.zeros((self.time_steps, self.state_shape[0]))  # clear stored states
                 done, cur_state, steps = False, self.env.reset(), 0
+                self.update_states(cur_state)  # update stored states
                 self.rewards.append(0)
                 print("episode {}: {} reward".format(episode, self.rewards[-2]))
                 if episode % save_freq == 0:  # save model every n episodes
