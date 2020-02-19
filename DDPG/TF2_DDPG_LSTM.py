@@ -9,12 +9,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, LSTM, Lambda, Concatenate
 from tensorflow.keras.optimizers import Adam
 
-'''
-Original paper: https://arxiv.org/pdf/1509.02971.pdf
-TODO: improvements
-- normalize observations
-- add support in agent for discrete-continuous hybrid action space
-'''
+# Original paper: https://arxiv.org/pdf/1509.02971.pdf
 
 tf.keras.backend.set_floatx('float64')
 
@@ -111,9 +106,6 @@ class DDPG:
         self.batch_size = batch_size
 
         # Tensorboard
-        current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        train_log_dir = 'logs/DDPG_lstm/' + current_time
-        self.summary_writer = tf.summary.create_file_writer(train_log_dir)
         self.summaries = {}
 
     def update_states(self, new_state):
@@ -129,10 +121,10 @@ class DDPG:
                               dtype=tf.float32) * self.action_bound
         a = tf.clip_by_value(a, -self.action_bound + self.action_shift, self.action_bound + self.action_shift)
 
-        q_val = self.critic.predict([states, a])
+        self.summaries['q_val'] = self.critic.predict([states, a])[0][0]
         self.sigma *= self.sigma_decay
 
-        return a, q_val[0][0]
+        return a
 
     def save_model(self, a_fn, c_fn):
         self.actor.save(a_fn)
@@ -180,7 +172,11 @@ class DDPG:
         self.summaries['actor_loss'] = actor_loss
 
     def train(self, max_episodes=50, max_epochs=8000, max_steps=500, save_freq=50):
-        done, episode, steps, epoch = False, 0, 0, 0
+        current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        train_log_dir = 'logs/DDPG_lstm/' + current_time
+        summary_writer = tf.summary.create_file_writer(train_log_dir)
+
+        done, episode, steps, epoch, total_reward = False, 0, 0, 0, 0
         cur_state = self.env.reset()
         self.update_states(cur_state)  # update stored states
         while episode < max_episodes or epoch < max_epochs:
@@ -192,12 +188,19 @@ class DDPG:
             if done:
                 episode += 1
                 print("episode {}: {} sigma, {} epochs".format(episode, self.sigma, epoch))
-                done, cur_state, steps = False, self.env.reset(), 0
+
+                with summary_writer.as_default():
+                    tf.summary.scalar('Main/total_reward', total_reward, step=episode)
+                    tf.summary.scalar('Main/steps', steps, step=episode)
+
+                summary_writer.flush()
+
+                done, cur_state, steps, total_reward = False, self.env.reset(), 0, 0
                 if episode % save_freq == 0:
                     self.save_model("ddpg_actor_episode{}.h5".format(episode),
                                     "ddpg_critic_episode{}.h5".format(episode))
 
-            a, q_val = self.act()  # model determine action, states taken from self.stored_states
+            a = self.act()  # model determine action, states taken from self.stored_states
             action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
             next_state, reward, done, _ = self.env.step(action)  # perform action on env
             modified_reward = 1 - abs(next_state[2] / (np.pi / 2))  # modified for CartPole env, reward based on angle
@@ -210,19 +213,19 @@ class DDPG:
             update_target_weights(self.actor, self.actor_target, tau=self.tau)  # iterates target model
             update_target_weights(self.critic, self.critic_target, tau=self.tau)
 
+            total_reward += reward
             steps += 1
             epoch += 1
 
             # Tensorboard update
-            with self.summary_writer.as_default():
-                if self.summaries:
+            with summary_writer.as_default():
+                if len(self.memory) > self.batch_size:
                     tf.summary.scalar('Loss/actor_loss', self.summaries['actor_loss'], step=epoch)
                     tf.summary.scalar('Loss/critic_loss', self.summaries['critic_loss'], step=epoch)
-                tf.summary.scalar('Stats/reward', reward, step=epoch)
-                tf.summary.scalar('Stats/q_val', q_val, step=epoch)
+                tf.summary.scalar('Stats/q_val', self.summaries['q_val'], step=epoch)
                 tf.summary.scalar('Stats/sigma', self.sigma, step=epoch)
 
-            self.summary_writer.flush()
+            summary_writer.flush()
 
         self.save_model("ddpg_actor_final_episode{}.h5".format(episode),
                         "ddpg_critic_final_episode{}.h5".format(episode))
