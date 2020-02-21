@@ -2,8 +2,7 @@ import random
 import numpy as np
 import gym
 import imageio  # write env render to mp4
-import pickle
-import matplotlib.pyplot as plt
+import datetime
 from collections import deque
 import tensorflow as tf
 from tensorflow.keras import Sequential
@@ -52,8 +51,7 @@ class DQN:
         self.target_model = self.create_model()
         self.target_model.set_weights(self.model.get_weights())
 
-        self.rewards = [0]
-        self.q_values = []
+        self.summaries = {}
 
     def create_model(self):
         model = Sequential()
@@ -75,7 +73,7 @@ class DQN:
         self.epsilon = max(self.epsilon_min, self.epsilon)
         epsilon = 0.01 if test else self.epsilon  # use epsilon = 0.01 when testing
         q_values = self.model.predict(states)[0]
-        self.q_values.append(max(q_values))
+        self.summaries['q_val'] = max(q_values)
         if np.random.random() < epsilon:
             return self.env.action_space.sample()  # sample random action
         return np.argmax(q_values)
@@ -102,7 +100,8 @@ class DQN:
                 q_future = max(self.target_model.predict(new_states)[0])
                 target[action] = reward + q_future * self.gamma
             batch_target.append(target)
-        self.model.fit(np.array(batch_states), np.array(batch_target), epochs=1, verbose=0)
+        hist = self.model.fit(np.array(batch_states), np.array(batch_target), epochs=1, verbose=0)
+        self.summaries['loss'] = np.mean(hist.history['loss'])
 
     def target_update(self):
         weights = self.model.get_weights()
@@ -122,37 +121,56 @@ class DQN:
         self.target_model.set_weights(self.model.get_weights())
 
     def train(self, max_episodes=10, max_steps=500, save_freq=10):
-        done, episode, steps = True, 0, 0
+        current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        train_log_dir = 'logs/DQN_basic_time_step{}/'.format(self.time_steps) + current_time
+        summary_writer = tf.summary.create_file_writer(train_log_dir)
+
+        done, episode, steps, epoch, total_reward = True, 0, 0, 0, 0
         while episode < max_episodes:
             if steps >= max_steps:
                 print("episode {}, reached max steps".format(episode))
                 self.save_model("dqn_basic_maxed_episode{}_time_step{}.h5".format(episode, self.time_steps))
 
             if done:
+                with summary_writer.as_default():
+                    tf.summary.scalar('Main/episode_reward', total_reward, step=episode)
+                    tf.summary.scalar('Main/episode_steps', steps, step=episode)
+
                 self.stored_states = np.zeros((self.time_steps, self.state_shape[0]))
-                done, cur_state, steps = False, self.env.reset(), 0
-                self.update_states(cur_state)  # update stored states
-                self.rewards.append(0)
-                print("episode {}: {} reward".format(episode, self.rewards[-2]))
+                print("episode {}: {} reward".format(episode, total_reward))
+
                 if episode % save_freq == 0:  # save model every n episodes
                     self.save_model("dqn_basic_episode{}_time_step{}.h5".format(episode, self.time_steps))
+
+                done, cur_state, steps, total_reward = False, self.env.reset(), 0, 0
+                self.update_states(cur_state)  # update stored states
                 episode += 1
 
             action = self.act()  # model determine action, states taken from self.stored_states
             new_state, reward, done, _ = self.env.step(action)  # perform action on env
-            modified_reward = 1 - abs(new_state[2] / (np.pi / 2))  # modified for CartPole env, reward based on angle
+            # modified_reward = 1 - abs(new_state[2] / (np.pi / 2))  # modified for CartPole env, reward based on angle
             prev_stored_states = self.stored_states
             self.update_states(new_state)  # update stored states
-            self.remember(prev_stored_states, action, modified_reward, self.stored_states, done)  # add to memory
+            self.remember(prev_stored_states, action, reward, self.stored_states, done)  # add to memory
             self.replay()  # iterates default (prediction) model through memory replay
             self.target_update()  # iterates target model
 
-            self.rewards[-1] += reward  # sum reward
+            total_reward += reward
             steps += 1
+            epoch += 1
+
+            # Tensorboard update
+            with summary_writer.as_default():
+                if len(self.memory) > self.batch_size:
+                    tf.summary.scalar('Stats/loss', self.summaries['loss'], step=epoch)
+                tf.summary.scalar('Stats/q_val', self.summaries['q_val'], step=epoch)
+                tf.summary.scalar('Main/step_reward', reward, step=epoch)
+
+            summary_writer.flush()
 
         self.save_model("dqn_basic_final_episode{}_time_step{}.h5".format(episode, self.time_steps))
 
-    def test(self, render=True, fps=30, filename='test_render_330.mp4'):
+    def test(self, render=True, fps=30, filename='test_render.mp4'):
         cur_state, done, rewards = self.env.reset(), False, 0
         video = imageio.get_writer(filename, fps=fps)
         while not done:
@@ -165,34 +183,6 @@ class DQN:
         video.close()
         return rewards
 
-    def plot_q_values(self, write_txt=True):
-        # write q values to a file
-        if write_txt:
-            file = open('q_values_{}_states.txt'.format(self.time_steps), 'wb')
-            pickle.dump(self.q_values, file)
-            file.close()
-
-        # save plot of q values vs epoches
-        plt.clf()
-        plt.plot(self.q_values, label="Q value")
-        plt.legend(loc="upper right")
-        # plt.show()
-        plt.savefig('q_values_{}_states.png'.format(self.time_steps), bbox_inches='tight')
-
-    def plot_rewards(self, write_txt=True):
-        # write rewards to a file
-        if write_txt:
-            file = open('rewards_{}_states.txt'.format(self.time_steps), 'wb')
-            pickle.dump(self.rewards, file)
-            file.close()
-
-        # save plot of rewards vs episodes
-        plt.clf()
-        plt.plot(self.rewards[:-1], label="Reward")
-        plt.legend(loc="upper right")
-        # plt.show()
-        plt.savefig('rewards_{}_states.png'.format(self.time_steps), bbox_inches='tight')
-
 
 if __name__ == "__main__":
     env = gym.make('CartPole-v0')
@@ -202,6 +192,3 @@ if __name__ == "__main__":
     # rewards = dqn_agent.test()
     # print("Total rewards: ", rewards)
     dqn_agent.train(max_episodes=50)
-
-    dqn_agent.plot_q_values()
-    dqn_agent.plot_rewards()

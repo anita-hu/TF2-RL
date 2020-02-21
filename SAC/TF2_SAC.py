@@ -23,9 +23,9 @@ tf.keras.backend.set_floatx('float64')
 
 def actor(state_shape, action_shape, units=(400, 300, 100)):
     state = Input(shape=state_shape)
-    x = Dense(units[0], name="L0", activation='relu')(state)
+    x = Dense(units[0], name="L0", activation="relu")(state)
     for index in range(1, len(units)):
-        x = Dense(units[index], name="L{}".format(index), activation='relu')(x)
+        x = Dense(units[index], name="L{}".format(index), activation="relu")(x)
 
     actions_mean = Dense(action_shape[0], name="Out_mean")(x)
     actions_std = Dense(action_shape[0], name="Out_std")(x)
@@ -38,9 +38,9 @@ def actor(state_shape, action_shape, units=(400, 300, 100)):
 def critic(state_shape, action_shape, units=(400, 200, 100)):
     inputs = [Input(shape=state_shape), Input(shape=action_shape)]
     concat = Concatenate(axis=-1)(inputs)
-    x = Dense(units[0], name="Hidden0", activation='relu')(concat)
+    x = Dense(units[0], name="Hidden0", activation="relu")(concat)
     for index in range(1, len(units)):
-        x = Dense(units[index], name="Hidden{}".format(index), activation='relu')(x)
+        x = Dense(units[index], name="Hidden{}".format(index), activation="relu")(x)
 
     output = Dense(1, name="Out_QVal")(x)
     model = Model(inputs=inputs, outputs=output)
@@ -60,8 +60,8 @@ class SAC:
     def __init__(
             self,
             env,
-            lr_actor=5e-4,
-            lr_critic=1e-3,
+            lr_actor=3e-5,
+            lr_critic=3e-4,
             actor_units=(64, 64),
             critic_units=(64, 64),
             auto_alpha=True,
@@ -223,7 +223,6 @@ class SAC:
         self.summaries['q1_loss'] = critic_loss_1
         self.summaries['q2_loss'] = critic_loss_2
         self.summaries['actor_loss'] = actor_loss
-        self.summaries['actor_log_std'] = tf.reduce_mean(log_stds)
 
         if self.auto_alpha:
             # optimize temperature
@@ -251,8 +250,8 @@ class SAC:
                     episode, episode_reward, self.alpha.numpy(), steps, epoch))
 
                 with summary_writer.as_default():
-                    tf.summary.scalar('Main/total_reward', episode_reward, step=episode)
-                    tf.summary.scalar('Main/step', steps, step=episode)
+                    tf.summary.scalar('Main/episode_reward', episode_reward, step=episode)
+                    tf.summary.scalar('Main/episode_steps', steps, step=episode)
 
                 summary_writer.flush()
 
@@ -261,7 +260,7 @@ class SAC:
                     self.save_model("sac_actor_episode{}.h5".format(episode),
                                     "sac_critic_episode{}.h5".format(episode))
 
-            if epoch > random_epochs:
+            if epoch > random_epochs and len(self.memory) > self.batch_size:
                 use_random = False
 
             action = self.act(cur_state, use_random=use_random)  # determine action
@@ -289,8 +288,10 @@ class SAC:
                         tf.summary.scalar('Loss/alpha_loss', self.summaries['alpha_loss'], step=epoch)
 
                 tf.summary.scalar('Stats/alpha', self.alpha, step=epoch)
+                tf.summary.scalar('Stats/log_alpha', self.log_alpha, step=epoch)
                 tf.summary.scalar('Stats/q_min', self.summaries['q_min'], step=epoch)
                 tf.summary.scalar('Stats/q_mean', self.summaries['q_mean'], step=epoch)
+                tf.summary.scalar('Main/step_reward', reward, step=epoch)
 
             summary_writer.flush()
 
@@ -312,11 +313,11 @@ class SAC:
 
 
 if __name__ == "__main__":
-    gym_env = gym.make("LunarLanderContinuous-v2")
+    gym_env = gym.make("MountainCarContinuous-v0")
     sac = SAC(gym_env)
 
-    # sac.load_actor("sac_actor_final_episode50.h5")
-    # sac.load_critic("sac_critic_final_episode50.h5")
-    sac.train(max_epochs=100000, random_epochs=0, save_freq=20)
+    # sac.load_actor("sac_actor_episode480.h5")
+    # sac.load_critic("sac_critic_episode480.h5")
+    sac.train(max_epochs=200000, random_epochs=10000, save_freq=50)
     # reward = sac.test()
     # print(reward)

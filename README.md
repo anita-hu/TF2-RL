@@ -1,8 +1,16 @@
 # Reinforcement Learning Agents 
-Implemented for Tensorflow 2.0+ (use version 2.1+ to avoid memory leak issues)
+Implemented for Tensorflow 2.0+
+
+## New Updates!
+- All agents have tensorboard logs during training!!
+- SAC
+- DDPG OU Noise
+
+## Future Plans
+- SAC Discrete
 
 ## Usage
-- Install dependancies imported in python file (including tensorflow 2.0+, gym, numpy, matplotlib)
+- Install dependancies imported ([my tf2 conda env as reference](https://github.com/anita-hu/TF2-RL/mytf2env.txt))
 - Each file contains example code that runs training on CartPole env
 - Training: `python3 TF2_DDPG_LSTM.py`
 - Tensorboard: `tensorboard --logdir=DDPG/logs`
@@ -13,21 +21,18 @@ Implemented for Tensorflow 2.0+ (use version 2.1+ to avoid memory leak issues)
 - Run: `python3 hyperparam_tune.py`
 
 ## Agents
-All agents tested using CartPole env with modified reward
+All agents tested using CartPole env
 
 | Name | On/off policy | Model | Action space support | Exploration method |
 | --- | --- | --- | --- | --- |
 | [DQN](https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf) | off-policy | Dense, LSTM | discrete | e-greedy |
-| [DDPG](https://arxiv.org/pdf/1509.02971.pdf) | off-policy | Dense, LSTM | discrete, continuous | Gaussian noise |
+| [DDPG](https://arxiv.org/pdf/1509.02971.pdf) | off-policy | Dense, LSTM | discrete, continuous | OU or Gaussian noise |
 | [AE-DDPG](https://arxiv.org/pdf/1903.00827.pdf) | off-policy | Dense | discrete, continuous | Random walk noise |
-| [SAC*](https://arxiv.org/pdf/1812.05905.pdf) | off-policy | Dense | continuous | Maximum entropy |
+| [SAC](https://arxiv.org/pdf/1812.05905.pdf) | off-policy | Dense | continuous | Maximum entropy |
 
-*work in progress
 
 ## Models
-Models used to generate the demos are included in the repo, you can also find q value and reward graphs that were generated after training
-
-UPDATE: Slowly moving towards tensorboard :D
+Models used to generate the demos are included in the repo, you can also find q value and reward graphs 
 
 ## Demos
 | DQN Basic, time step = 4, 500 reward | DQN LSTM, time step = 4, 500 reward |

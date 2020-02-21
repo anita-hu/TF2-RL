@@ -1,12 +1,11 @@
 import gym
 import random
 import imageio
-import pickle
+import datetime
 import numpy as np
 from collections import deque
 import threading
 import time
-import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, Lambda, Concatenate
@@ -27,7 +26,7 @@ def actor(state_shape, action_dim, action_bound, action_shift, units=(400, 300),
 
     outputs = []  # for loop for discrete-continuous action space
     for i in range(num_actions):
-        unscaled_output = Dense(action_dim, name="L{}".format(i), activation='tanh')(x)
+        unscaled_output = Dense(action_dim, name="Out{}".format(i), activation='tanh')(x)
         scalar = action_bound * np.ones(action_dim)
         output = Lambda(lambda op: op * scalar)(unscaled_output)
         if np.sum(action_shift) != 0:
@@ -75,11 +74,10 @@ class AE_DDPG:
             num_envs=5,
             discrete=False,
             lr_actor=1e-4,
-            lr_critic=4e-3,
+            lr_critic=1e-3,
             actor_units=(12, 8),
             critic_units=(12, 8),
-            sigma=0.4,
-            sigma_decay=0.9995,
+            sigma=0.3,
             tau=0.125,
             gamma=0.85,
             rho=0.2,
@@ -91,7 +89,7 @@ class AE_DDPG:
         self.env = [gym.make(env_name) for i in range(num_envs)]
         self.num_envs = num_envs  # number of environments for async data collection
         self.state_shape = self.env[0].observation_space.shape  # shape of observations
-        self.action_dim = self.env[0].action_space.n  # number of actions
+        self.action_dim = self.env[0].action_space.n if discrete else self.env[0].action_space.shape[0]  # number of actions
         self.discrete = discrete
         self.action_bound = (self.env[0].action_space.high - self.env[0].action_space.low) / 2 if not discrete else 1.
         self.action_shift = (self.env[0].action_space.high + self.env[0].action_space.low) / 2 if not discrete else 0.
@@ -116,8 +114,6 @@ class AE_DDPG:
 
         # Set hyperparameters
         self.sigma = sigma  # stddev for mean-zero gaussian noise
-        # expotential decay, we take into account it is updated by multiple threads
-        self.sigma_decay = sigma_decay**(1/self.num_envs)
         self.gamma = gamma  # discount factor
         self.tau = tau  # target model update
         self.rho = rho  # chance of sampling from hmemory, paper recommends [0.05, 0.25]
@@ -125,8 +121,8 @@ class AE_DDPG:
 
         # Training log
         self.max_reward = 0
-        self.q_values = [[]] * self.num_envs
-        self.rewards = [[]] * self.num_envs
+        self.rewards = []
+        self.summaries = {}
 
     def act(self, state, random_walk):
         state = np.expand_dims(state, axis=0).astype(np.float32)
@@ -136,7 +132,6 @@ class AE_DDPG:
         a = tf.clip_by_value(a, -self.action_bound + self.action_shift, self.action_bound + self.action_shift)
 
         q_val = self.critic.predict([state, a])
-        self.sigma *= self.sigma_decay
 
         return a, q_val[0][0]
 
@@ -182,7 +177,7 @@ class AE_DDPG:
         target_qs = rewards + q_future * self.gamma * (1. - dones)
 
         # train critic
-        self.critic.fit([states, actions], target_qs, epochs=1, batch_size=self.batch_size, verbose=0)
+        hist = self.critic.fit([states, actions], target_qs, epochs=1, batch_size=self.batch_size, verbose=0)
 
         # train actor
         with tf.GradientTape() as tape:
@@ -192,38 +187,57 @@ class AE_DDPG:
         actor_grad = tape.gradient(actor_loss, self.actor.trainable_variables)  # compute actor gradient
         self.actor_optimizer.apply_gradients(zip(actor_grad, self.actor.trainable_variables))
 
-    def async_collection(self, index):
+        self.summaries['critic_loss'] = np.mean(hist.history['loss'])
+        self.summaries['actor_loss'] = actor_loss
+
+    def async_collection(self, index, log_dir):
+        summary_writer = tf.summary.create_file_writer(log_dir + '/env{}'.format(index))
+        episode = total_steps = 0
         while True:
-            done, cur_state, total_reward, rand_walk_noise = False, self.env[index].reset(), 0, 0
+            done, cur_state, total_reward, rand_walk_noise, step = False, self.env[index].reset(), 0, 0, 0
             while not done:
                 a, q_val = self.act(cur_state, rand_walk_noise)  # model determine action given state
                 action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
                 next_state, reward, done, _ = self.env[index].step(action)  # perform action on env
-                modified_reward = 1 - abs(
-                    next_state[2] / (np.pi / 2))  # modified for CartPole env, reward based on angle
 
-                self.cache_buffer[index].append([cur_state, a, modified_reward, next_state, done])  # add to buffer
-                self.store_memory(cur_state, a, modified_reward, next_state, done)  # add to memory
+                self.cache_buffer[index].append([cur_state, a, reward, next_state, done])  # add to buffer
+                self.store_memory(cur_state, a, reward, next_state, done)  # add to memory
 
                 cur_state = next_state
                 total_reward += reward
                 rand_walk_noise += tf.random.normal(shape=a.shape, mean=0., stddev=self.sigma, dtype=tf.float32)
-                self.q_values[index].append(q_val)
+                with summary_writer.as_default():
+                    tf.summary.scalar('Stats/q_val', q_val, step=total_steps)
+                    tf.summary.scalar('Stats/action', action, step=total_steps)
+                summary_writer.flush()
 
-            self.rewards[index].append(total_reward)
+                step += 1
+                total_steps += 1
 
-            if total_reward > self.max_reward:
+            with summary_writer.as_default():
+                tf.summary.scalar('Main/episode_reward', total_reward, step=episode)
+                tf.summary.scalar('Main/episode_steps', step, step=episode)
+            summary_writer.flush()
+
+            if total_reward >= self.max_reward:
                 self.max_reward = total_reward
                 while len(self.cache_buffer[index]) > 0:
                     transitions = self.cache_buffer[index].pop()
                     self.store_memory(*transitions, hmemory=True)
 
-    def train(self, max_epochs=8000, save_freq=100):
+            episode += 1
+            self.rewards.append(total_reward)
+
+    def train(self, max_epochs=8000, save_freq=20):
+        current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        train_log_dir = 'logs/' + current_time
+        summary_writer = tf.summary.create_file_writer(train_log_dir)
+
         collection_threads, epoch = [], 0
         self.actor._make_predict_function()  # from https://github.com/jaromiru/AI-blog/issues/2
         print("-- starting threads --")
         for i in range(self.num_envs):
-            t = threading.Thread(target=self.async_collection, args=(i, ), daemon=True)
+            t = threading.Thread(target=self.async_collection, args=(i, train_log_dir), daemon=True)
             t.start()
             collection_threads.append(t)
 
@@ -237,14 +251,21 @@ class AE_DDPG:
             update_target_weights(self.actor, self.actor_target, tau=self.tau)  # iterates target model
             update_target_weights(self.critic, self.critic_target, tau=self.tau)
 
+            with summary_writer.as_default():
+                if len(self.memory) > self.batch_size:
+                    tf.summary.scalar('Loss/actor_loss', self.summaries['actor_loss'], step=epoch)
+                    tf.summary.scalar('Loss/critic_loss', self.summaries['critic_loss'], step=epoch)
+
+            summary_writer.flush()
+
             epoch += 1
             if epoch % save_freq == 0:
                 self.save_model("aeddpg_actor_epoch{}.h5".format(epoch),
                                 "aeddpg_critic_epoch{}.h5".format(epoch))
 
             dt = time.time() - start
-            print("train epoch {}: {} reward, {} q value, {} sigma, {} seconds".format(
-                epoch, self.rewards[0][-1], self.q_values[0][-1], self.sigma, dt))
+            print("train epoch {}: {} episodes, {} mean reward, {} max reward, {} seconds".format(
+                epoch, len(self.rewards), np.mean(self.rewards[-100:]), self.max_reward, dt))
 
         print("-- saving final model --")
         self.save_model("aeddpg_actor_final_epoch{}.h5".format(max_epochs),

@@ -9,6 +9,8 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, LSTM, Lambda, Concatenate
 from tensorflow.keras.optimizers import Adam
 
+from TF2_DDPG_Basic import OrnsteinUhlenbeckNoise, NormalNoise
+
 # Original paper: https://arxiv.org/pdf/1509.02971.pdf
 
 tf.keras.backend.set_floatx('float64')
@@ -67,8 +69,8 @@ class DDPG:
             lr_critic=1e-3,
             actor_units=(24, 16),
             critic_units=(24, 16),
-            sigma=0.4,
-            sigma_decay=0.9995,
+            noise='ou',
+            sigma=0.2,
             tau=0.125,
             gamma=0.85,
             batch_size=64,
@@ -84,6 +86,10 @@ class DDPG:
         self.action_bound = (env.action_space.high - env.action_space.low) / 2 if not discrete else 1.
         self.action_shift = (env.action_space.high + env.action_space.low) / 2 if not discrete else 0.
         self.memory = deque(maxlen=memory_cap)
+        if noise == 'ou':
+            self.noise = OrnsteinUhlenbeckNoise(mu=np.zeros(self.action_dim), sigma=sigma)
+        else:
+            self.noise = NormalNoise(mu=np.zeros(self.action_dim), sigma=sigma)
 
         # Define and initialize Actor network
         self.actor = actor(input_shape, self.action_dim, self.action_bound, self.action_shift, actor_units)
@@ -99,8 +105,6 @@ class DDPG:
         update_target_weights(self.critic, self.critic_target, tau=1.)
 
         # Set hyperparameters
-        self.sigma = sigma  # stddev for mean-zero gaussian noise
-        self.sigma_decay = sigma_decay  # expotential decay
         self.gamma = gamma  # discount factor
         self.tau = tau  # target model update
         self.batch_size = batch_size
@@ -116,13 +120,10 @@ class DDPG:
     def act(self, add_noise=True):
         states = np.expand_dims(self.stored_states, axis=0).astype(np.float32)
         a = self.actor.predict(states)
-        # add mean-zero Gaussian noise
-        a += tf.random.normal(shape=a.shape, mean=0., stddev=self.sigma * float(add_noise),
-                              dtype=tf.float32) * self.action_bound
+        a += self.noise() * add_noise * self.action_bound
         a = tf.clip_by_value(a, -self.action_bound + self.action_shift, self.action_bound + self.action_shift)
 
         self.summaries['q_val'] = self.critic.predict([states, a])[0][0]
-        self.sigma *= self.sigma_decay
 
         return a
 
@@ -187,13 +188,15 @@ class DDPG:
 
             if done:
                 episode += 1
-                print("episode {}: {} sigma, {} epochs".format(episode, self.sigma, epoch))
+                print("episode {}: {} total reward, {} steps, {} epochs".format(
+                    episode, total_reward, steps, epoch))
 
                 with summary_writer.as_default():
-                    tf.summary.scalar('Main/total_reward', total_reward, step=episode)
-                    tf.summary.scalar('Main/steps', steps, step=episode)
+                    tf.summary.scalar('Main/episode_reward', total_reward, step=episode)
+                    tf.summary.scalar('Main/episode_steps', steps, step=episode)
 
                 summary_writer.flush()
+                self.noise.reset()
 
                 done, cur_state, steps, total_reward = False, self.env.reset(), 0, 0
                 if episode % save_freq == 0:
@@ -203,11 +206,10 @@ class DDPG:
             a = self.act()  # model determine action, states taken from self.stored_states
             action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
             next_state, reward, done, _ = self.env.step(action)  # perform action on env
-            modified_reward = 1 - abs(next_state[2] / (np.pi / 2))  # modified for CartPole env, reward based on angle
             cur_stored_states = self.stored_states
             self.update_states(next_state)  # update stored states
 
-            self.remember(cur_stored_states, a, modified_reward, self.stored_states, done)  # add to memory
+            self.remember(cur_stored_states, a, reward, self.stored_states, done)  # add to memory
             self.replay()  # train models through memory replay
 
             update_target_weights(self.actor, self.actor_target, tau=self.tau)  # iterates target model
@@ -223,7 +225,7 @@ class DDPG:
                     tf.summary.scalar('Loss/actor_loss', self.summaries['actor_loss'], step=epoch)
                     tf.summary.scalar('Loss/critic_loss', self.summaries['critic_loss'], step=epoch)
                 tf.summary.scalar('Stats/q_val', self.summaries['q_val'], step=epoch)
-                tf.summary.scalar('Stats/sigma', self.sigma, step=epoch)
+                tf.summary.scalar('Main/step_reward', reward, step=epoch)
 
             summary_writer.flush()
 

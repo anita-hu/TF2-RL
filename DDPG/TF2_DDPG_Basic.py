@@ -56,6 +56,37 @@ def update_target_weights(model, target_model, tau=0.005):
     target_model.set_weights(target_weights)
 
 
+# Taken from https://github.com/openai/baselines/blob/master/baselines/ddpg/noise.py
+class OrnsteinUhlenbeckNoise:
+    def __init__(self, mu, sigma=0.2, theta=.15, dt=1e-2, x0=None):
+        self.theta = theta
+        self.mu = mu
+        self.sigma = sigma
+        self.dt = dt
+        self.x0 = x0
+        self.reset()
+
+    def __call__(self):
+        x = self.x_prev + self.theta * (self.mu - self.x_prev) * self.dt + self.sigma * np.sqrt(self.dt) * np.random.normal(size=self.mu.shape)
+        self.x_prev = x
+        return x
+
+    def reset(self):
+        self.x_prev = self.x0 if self.x0 is not None else np.zeros_like(self.mu)
+
+
+class NormalNoise:
+    def __init__(self, mu, sigma=0.15):
+        self.mu = mu
+        self.sigma = sigma
+
+    def __call__(self):
+        return tf.random.normal(shape=self.mu.shape, mean=0., stddev=self.sigma, dtype=tf.float32)
+
+    def reset(self):
+        pass
+
+
 class DDPG:
     def __init__(
             self,
@@ -65,12 +96,12 @@ class DDPG:
             lr_critic=1e-3,
             actor_units=(24, 16),
             critic_units=(24, 16),
-            sigma=0.4,
-            sigma_decay=0.9995,
+            noise='ou',
+            sigma=0.2,
             tau=0.125,
             gamma=0.85,
             batch_size=64,
-            memory_cap=1000
+            memory_cap=100000
     ):
         self.env = env
         self.state_shape = env.observation_space.shape  # shape of observations
@@ -79,6 +110,10 @@ class DDPG:
         self.action_bound = (env.action_space.high - env.action_space.low) / 2 if not discrete else 1.
         self.action_shift = (env.action_space.high + env.action_space.low) / 2 if not discrete else 0.
         self.memory = deque(maxlen=memory_cap)
+        if noise == 'ou':
+            self.noise = OrnsteinUhlenbeckNoise(mu=np.zeros(self.action_dim), sigma=sigma)
+        else:
+            self.noise = NormalNoise(mu=np.zeros(self.action_dim), sigma=sigma)
 
         # Define and initialize Actor network
         self.actor = actor(self.state_shape, self.action_dim, self.action_bound, self.action_shift, actor_units)
@@ -94,8 +129,6 @@ class DDPG:
         update_target_weights(self.critic, self.critic_target, tau=1.)
 
         # Set hyperparameters
-        self.sigma = sigma  # stddev for mean-zero gaussian noise
-        self.sigma_decay = sigma_decay  # expotential decay
         self.gamma = gamma  # discount factor
         self.tau = tau  # target model update
         self.batch_size = batch_size
@@ -106,13 +139,10 @@ class DDPG:
     def act(self, state, add_noise=True):
         state = np.expand_dims(state, axis=0).astype(np.float32)
         a = self.actor.predict(state)
-        # add mean-zero Gaussian noise
-        a += tf.random.normal(shape=a.shape, mean=0., stddev=self.sigma * float(add_noise),
-                              dtype=tf.float32) * self.action_bound
+        a += self.noise() * add_noise * self.action_bound
         a = tf.clip_by_value(a, -self.action_bound + self.action_shift, self.action_bound + self.action_shift)
 
         self.summaries['q_val'] = self.critic.predict([state, a])[0][0]
-        self.sigma *= self.sigma_decay
 
         return a
 
@@ -176,14 +206,15 @@ class DDPG:
 
             if done:
                 episode += 1
-                print("episode {}: {} total reward, {} sigma, {} steps, {} epochs".format(
-                    episode, total_reward, self.sigma, steps, epoch))
+                print("episode {}: {} total reward, {} steps, {} epochs".format(
+                    episode, total_reward, steps, epoch))
 
                 with summary_writer.as_default():
-                    tf.summary.scalar('Main/total_reward', total_reward, step=episode)
-                    tf.summary.scalar('Main/steps', steps, step=episode)
+                    tf.summary.scalar('Main/episode_reward', total_reward, step=episode)
+                    tf.summary.scalar('Main/episode_steps', steps, step=episode)
 
                 summary_writer.flush()
+                self.noise.reset()
 
                 done, cur_state, steps, total_reward = False, self.env.reset(), 0, 0
                 if episode % save_freq == 0:
@@ -193,9 +224,8 @@ class DDPG:
             a = self.act(cur_state)  # model determine action given state
             action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
             next_state, reward, done, _ = self.env.step(action)  # perform action on env
-            modified_reward = 1 - abs(next_state[2] / (np.pi / 2))  # modified for CartPole env, reward based on angle
 
-            self.remember(cur_state, a, modified_reward, next_state, done)  # add to memory
+            self.remember(cur_state, a, reward, next_state, done)  # add to memory
             self.replay()  # train models through memory replay
 
             update_target_weights(self.actor, self.actor_target, tau=self.tau)  # iterates target model
@@ -211,8 +241,8 @@ class DDPG:
                 if len(self.memory) > self.batch_size:
                     tf.summary.scalar('Loss/actor_loss', self.summaries['actor_loss'], step=epoch)
                     tf.summary.scalar('Loss/critic_loss', self.summaries['critic_loss'], step=epoch)
+                tf.summary.scalar('Main/step_reward', reward, step=epoch)
                 tf.summary.scalar('Stats/q_val', self.summaries['q_val'], step=epoch)
-                tf.summary.scalar('Stats/sigma', self.sigma, step=epoch)
 
             summary_writer.flush()
 
