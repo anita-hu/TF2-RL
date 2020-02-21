@@ -10,7 +10,7 @@ Implemented for Tensorflow 2.0+
 - SAC Discrete
 
 ## Usage
-- Install dependancies imported ([my tf2 conda env as reference](https://github.com/anita-hu/TF2-RL/mytf2env.txt))
+- Install dependancies imported ([my tf2 conda env as reference](https://github.com/anita-hu/TF2-RL/blob/master/mytf2env.txt))
 - Each file contains example code that runs training on CartPole env
 - Training: `python3 TF2_DDPG_LSTM.py`
 - Tensorboard: `tensorboard --logdir=DDPG/logs`
