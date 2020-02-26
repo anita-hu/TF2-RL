@@ -18,7 +18,7 @@ tfd = tfp.distributions
 tf.keras.backend.set_floatx('float64')
 
 # paper https://arxiv.org/pdf/1812.05905.pdf
-# code references https://github.com/keiohta/tf2rl, https://github.com/rail-berkeley/softlearning
+# code references https://github.com/StepNeverStop/RLs, https://github.com/rail-berkeley/softlearning
 
 
 def actor(state_shape, action_shape, units=(400, 300, 100)):
