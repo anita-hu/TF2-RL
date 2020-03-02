@@ -144,8 +144,10 @@ class SAC:
 
             a, log_prob = self.process_raw_actions(means, log_stds, test=test)
 
-        self.summaries['q_min'] = tf.math.minimum(self.critic_1.predict([state, a])[0][0], self.critic_2.predict([state, a])[0][0])
-        self.summaries['q_mean'] = np.mean([self.critic_1.predict([state, a])[0][0], self.critic_2.predict([state, a])[0][0]])
+        q1 = self.critic_1.predict([state, a])[0][0]
+        q2 = self.critic_2.predict([state, a])[0][0]
+        self.summaries['q_min'] = tf.math.minimum(q1, q2)
+        self.summaries['q_mean'] = np.mean([q1, q2])
 
         return a
 
