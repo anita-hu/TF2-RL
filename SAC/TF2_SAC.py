@@ -107,7 +107,7 @@ class SAC:
             self.alpha.assign(tf.exp(self.log_alpha))
             self.alpha_optimizer = Adam(learning_rate=lr_actor)
         else:
-            self.alpha = alpha
+            self.alpha = tf.Variable(alpha, dtype=tf.float64)
 
         # Set hyperparameters
         self.gamma = gamma  # discount factor
