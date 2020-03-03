@@ -290,7 +290,8 @@ class SAC:
                         tf.summary.scalar('Loss/alpha_loss', self.summaries['alpha_loss'], step=epoch)
 
                 tf.summary.scalar('Stats/alpha', self.alpha, step=epoch)
-                tf.summary.scalar('Stats/log_alpha', self.log_alpha, step=epoch)
+                if self.auto_alpha:
+                    tf.summary.scalar('Stats/log_alpha', self.log_alpha, step=epoch)
                 tf.summary.scalar('Stats/q_min', self.summaries['q_min'], step=epoch)
                 tf.summary.scalar('Stats/q_mean', self.summaries['q_mean'], step=epoch)
                 tf.summary.scalar('Main/step_reward', reward, step=epoch)
