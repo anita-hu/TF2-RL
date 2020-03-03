@@ -81,7 +81,7 @@ class NormalNoise:
         self.sigma = sigma
 
     def __call__(self):
-        return tf.random.normal(shape=self.mu.shape, mean=0., stddev=self.sigma, dtype=tf.float32)
+        return np.random.normal(scale=self.sigma, size=self.mu.shape)
 
     def reset(self):
         pass
