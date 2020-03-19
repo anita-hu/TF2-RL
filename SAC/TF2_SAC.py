@@ -12,9 +12,6 @@ import tensorflow_probability as tfp
 
 tfd = tfp.distributions
 
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
 tf.keras.backend.set_floatx('float64')
 
 # paper https://arxiv.org/pdf/1812.05905.pdf
@@ -139,7 +136,7 @@ class SAC:
         if use_random:
             a = tf.random.uniform(shape=(1, self.action_shape[0]), minval=-1, maxval=1, dtype=tf.float64)
         else:
-            means, log_stds = self.actor(state)
+            means, log_stds = self.actor.predict(state)
             log_stds = tf.clip_by_value(log_stds, self.log_std_min, self.log_std_max)
 
             a, log_prob = self.process_raw_actions(means, log_stds, test=test)
@@ -305,7 +302,7 @@ class SAC:
         cur_state, done, rewards = self.env.reset(), False, 0
         video = imageio.get_writer(filename, fps=fps)
         while not done:
-            action = self.act(cur_state)
+            action = self.act(cur_state, test=True)
             next_state, reward, done, _ = self.env.step(action[0])
             cur_state = next_state
             rewards += reward

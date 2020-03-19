@@ -2,9 +2,7 @@
 Implemented for Tensorflow 2.0+
 
 ## New Updates!
-- All agents have tensorboard logs during training!!
-- SAC
-- DDPG OU Noise
+- PPO
 
 ## Future Plans
 - SAC Discrete
@@ -23,12 +21,13 @@ Implemented for Tensorflow 2.0+
 ## Agents
 All agents tested using CartPole env
 
-| Name | On/off policy | Model | Action space support | Exploration method |
-| --- | --- | --- | --- | --- |
-| [DQN](https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf) | off-policy | Dense, LSTM | discrete | e-greedy |
-| [DDPG](https://arxiv.org/pdf/1509.02971.pdf) | off-policy | Dense, LSTM | discrete, continuous | OU or Gaussian noise |
-| [AE-DDPG](https://arxiv.org/pdf/1903.00827.pdf) | off-policy | Dense | discrete, continuous | Random walk noise |
-| [SAC](https://arxiv.org/pdf/1812.05905.pdf) | off-policy | Dense | continuous | Maximum entropy |
+| Name | On/off policy | Model | Action space support |
+| --- | --- | --- | --- | 
+| [DQN](https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf) | off-policy | Dense, LSTM | discrete |
+| [DDPG](https://arxiv.org/pdf/1509.02971.pdf) | off-policy | Dense, LSTM | discrete, continuous | 
+| [AE-DDPG](https://arxiv.org/pdf/1903.00827.pdf) | off-policy | Dense | discrete, continuous | 
+| [SAC](https://arxiv.org/pdf/1812.05905.pdf) | off-policy | Dense | continuous |
+| [PPO](https://arxiv.org/pdf/1707.06347.pdf) | on-policy | Dense | continuous | 
 
 
 ## Models
