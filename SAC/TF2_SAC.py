@@ -114,7 +114,7 @@ class SAC:
         # Tensorboard
         self.summaries = {}
 
-    def process_raw_actions(self, mean, log_std, test=False, eps=1e-6):
+    def process_actions(self, mean, log_std, test=False, eps=1e-6):
         std = tf.math.exp(log_std)
         raw_actions = mean
 
@@ -139,7 +139,7 @@ class SAC:
             means, log_stds = self.actor.predict(state)
             log_stds = tf.clip_by_value(log_stds, self.log_std_min, self.log_std_max)
 
-            a, log_prob = self.process_raw_actions(means, log_stds, test=test)
+            a, log_prob = self.process_actions(means, log_stds, test=test)
 
         q1 = self.critic_1.predict([state, a])[0][0]
         q2 = self.critic_2.predict([state, a])[0][0]
@@ -180,7 +180,7 @@ class SAC:
             # next state action log probs
             means, log_stds = self.actor(next_states)
             log_stds = tf.clip_by_value(log_stds, self.log_std_min, self.log_std_max)
-            next_actions, log_probs = self.process_raw_actions(means, log_stds)
+            next_actions, log_probs = self.process_actions(means, log_stds)
 
             # critics loss
             current_q_1 = self.critic_1([states, actions])
@@ -196,7 +196,7 @@ class SAC:
             # current state action log probs
             means, log_stds = self.actor(states)
             log_stds = tf.clip_by_value(log_stds, self.log_std_min, self.log_std_max)
-            actions, log_probs = self.process_raw_actions(means, log_stds)
+            actions, log_probs = self.process_actions(means, log_stds)
 
             # actor loss
             current_q_1 = self.critic_1([states, actions])

@@ -27,7 +27,7 @@ All agents tested using CartPole env
 | [DDPG](https://arxiv.org/pdf/1509.02971.pdf) | off-policy | Dense, LSTM | discrete, continuous | 
 | [AE-DDPG](https://arxiv.org/pdf/1903.00827.pdf) | off-policy | Dense | discrete, continuous | 
 | [SAC](https://arxiv.org/pdf/1812.05905.pdf) | off-policy | Dense | continuous |
-| [PPO](https://arxiv.org/pdf/1707.06347.pdf) | on-policy | Dense | continuous | 
+| [PPO](https://arxiv.org/pdf/1707.06347.pdf) | on-policy | Dense | discrete, continuous | 
 
 
 ## Models
