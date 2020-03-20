@@ -99,7 +99,7 @@ class PPO:
         output, value = self.policy(state)
         dist = self.get_dist(output)
 
-        log_probs = dist.log_prob(action)
+        log_probs = tf.reduce_sum(dist.log_prob(action))
         entropy = dist.entropy()
 
         return log_probs, entropy, value
@@ -114,12 +114,12 @@ class PPO:
         else:
             action = output if test else dist.sample()
 
-        log_probs = dist.log_prob(action)
+        log_probs = tf.reduce_sum(dist.log_prob(action))
 
         if not self.discrete:
             action = action * self.action_bound + self.action_shift
 
-        return action[0].numpy(), value[0][0], log_probs[0].numpy()
+        return action[0].numpy(), value[0][0], log_probs.numpy()
 
     def save_model(self, fn):
         self.policy.save(fn)
@@ -165,7 +165,7 @@ class PPO:
         self.summaries['vf_loss'] = vf_loss
         self.summaries['entropy'] = entropy
 
-    def train(self, max_epochs=8000, max_steps=2000, save_freq=50):
+    def train(self, max_epochs=8000, max_steps=1000, save_freq=50):
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         train_log_dir = 'logs/' + current_time
         summary_writer = tf.summary.create_file_writer(train_log_dir)
@@ -176,7 +176,7 @@ class PPO:
         obs, actions, log_probs, rewards, v_preds, next_v_preds = [], [], [], [], [], []
 
         while epoch < max_epochs:
-            while not done and steps <= max_steps:
+            while not done and steps < max_steps:
                 action, value, log_prob = self.act(cur_state)  # determine action
                 cur_state, reward, done, _ = self.env.step(action)  # act on env
                 self.env.render(mode='rgb_array')
@@ -244,7 +244,7 @@ class PPO:
 
 
 if __name__ == "__main__":
-    gym_env = gym.make("MountainCarContinuous-v0")
+    gym_env = gym.make("Pendulum-v0")
     try:
         # Ensure action bound is symmetric
         assert (gym_env.action_space.high == -gym_env.action_space.low)
