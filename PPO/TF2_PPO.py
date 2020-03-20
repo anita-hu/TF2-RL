@@ -26,7 +26,7 @@ def model(state_shape, action_dim, units=(400, 300, 100), discrete=False):
     for index in range(1, len(units)):
         vf = Dense(units[index], name="Value_L{}".format(index), activation="tanh")(vf)
 
-    value_pred = Dense(action_dim, name="Out_value")(vf)
+    value_pred = Dense(1, name="Out_value")(vf)
 
     pi = Dense(units[0], name="Policy_L0", activation="tanh")(state)
     for index in range(1, len(units)):
@@ -110,7 +110,7 @@ class PPO:
         dist = self.get_dist(output)
 
         if self.discrete:
-            action = tf.math.argmax(output) if test else dist.sample()
+            action = tf.math.argmax(output, axis=-1) if test else dist.sample()
         else:
             action = output if test else dist.sample()
 
@@ -138,7 +138,7 @@ class PPO:
         return gaes
 
     def learn(self, observations, actions, log_probs, rewards, gaes):
-        rewards = np.expand_dims(rewards, axis=0).astype(np.float64)
+        rewards = np.expand_dims(rewards, axis=-1).astype(np.float64)
         with tf.GradientTape(persistent=True) as tape:
             new_log_probs, entropy, state_values = self.evaluate_actions(observations, actions)
 
@@ -153,7 +153,9 @@ class PPO:
             entropy = -tf.reduce_mean(entropy)
             total_loss = loss_clip + self.c1 * vf_loss + self.c2 * entropy
 
-        train_variables = self.policy.trainable_variables + [self.policy_stdev]
+        train_variables = self.policy.trainable_variables
+        if not self.discrete:
+            train_variables += [self.policy_stdev]
         grad = tape.gradient(total_loss, train_variables)  # compute actor gradient
         self.model_optimizer.apply_gradients(zip(grad, train_variables))
 
