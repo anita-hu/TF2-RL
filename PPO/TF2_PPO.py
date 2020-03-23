@@ -3,7 +3,6 @@ import copy
 import imageio
 import datetime
 import numpy as np
-from collections import deque
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense
@@ -47,7 +46,7 @@ class PPO:
             self,
             env,
             discrete=False,
-            lr=1e-4,
+            lr=5e-4,
             hidden_units=(24, 16),
             c1=1.0,
             c2=0.01,
@@ -147,19 +146,19 @@ class PPO:
             ratios = tf.exp(new_log_probs - log_probs)
             clipped_ratios = tf.clip_by_value(ratios, clip_value_min=1-self.clip_ratio,
                                               clip_value_max=1+self.clip_ratio)
-            loss_clip = tf.minimum(tf.multiply(gaes, ratios), tf.multiply(gaes, clipped_ratios))
-            loss_clip = -tf.reduce_mean(loss_clip)
+            loss_clip = tf.minimum(gaes * ratios, gaes * clipped_ratios)
+            loss_clip = tf.reduce_mean(loss_clip)
 
             target_values = rewards + self.gamma * next_v_preds
-            vf_loss = tf.reduce_mean(tf.math.square(state_values - target_values))
+            vf_loss = tf.reduce_mean(0.5 * tf.math.square(state_values - target_values))
 
-            entropy = -tf.reduce_mean(entropy)
-            total_loss = loss_clip + self.c1 * vf_loss + self.c2 * entropy
+            entropy = tf.reduce_mean(entropy)
+            total_loss = -loss_clip + self.c1 * vf_loss - self.c2 * entropy
 
         train_variables = self.policy.trainable_variables
         if not self.discrete:
             train_variables += [self.policy_stdev]
-        grad = tape.gradient(total_loss, train_variables)  # compute actor gradient
+        grad = tape.gradient(total_loss, train_variables)  # compute gradient
         self.model_optimizer.apply_gradients(zip(grad, train_variables))
 
         # tensorboard info
@@ -168,21 +167,22 @@ class PPO:
         self.summaries['vf_loss'] = vf_loss
         self.summaries['entropy'] = entropy
 
-    def train(self, max_epochs=8000, max_steps=1000, save_freq=50):
+    def train(self, max_epochs=8000, max_steps=500, save_freq=50):
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         train_log_dir = 'logs/' + current_time
         summary_writer = tf.summary.create_file_writer(train_log_dir)
 
-        done, episode, steps, epoch = False, 0, 0, 0
-        cur_state = self.env.reset()
-
-        obs, actions, log_probs, rewards, v_preds, next_v_preds = [], [], [], [], [], []
+        episode, epoch = 0, 0
 
         while epoch < max_epochs:
+            done, steps = False, 0
+            cur_state = self.env.reset()
+            obs, actions, log_probs, rewards, v_preds, next_v_preds = [], [], [], [], [], []
+
             while not done and steps < max_steps:
                 action, value, log_prob = self.act(cur_state)  # determine action
-                cur_state, reward, done, _ = self.env.step(action)  # act on env
-                self.env.render(mode='rgb_array')
+                next_state, reward, done, _ = self.env.step(action)  # act on env
+                # self.env.render(mode='rgb_array')
 
                 rewards.append(reward)
                 v_preds.append(value)
@@ -191,6 +191,11 @@ class PPO:
                 log_probs.append(log_prob)
 
                 steps += 1
+                cur_state = next_state
+
+            if steps > max_steps:
+                print("episode {}, reached max steps".format(episode))
+                self.save_model("ppo_episode{}.h5".format(episode))
 
             next_v_preds = v_preds[1:] + [0]
             gaes = self.get_gaes(rewards, v_preds, next_v_preds)
@@ -227,8 +232,6 @@ class PPO:
 
             summary_writer.flush()
 
-            done, cur_state, steps, episode_reward = False, self.env.reset(), 0, 0
-            obs, actions, rewards, v_preds, next_v_preds = [], [], [], [], []
             if episode % save_freq == 0:
                 self.save_model("ppo_episode{}.h5".format(episode))
 
@@ -249,9 +252,8 @@ class PPO:
 
 
 if __name__ == "__main__":
-    gym_env = gym.make("CartPole-v0")
+    gym_env = gym.make("CartPole-v1")
     # gym_env = gym.make("MountainCarContinuous-v0")
-    gym_env.seed(0)
     try:
         # Ensure action bound is symmetric
         assert (gym_env.action_space.high == -gym_env.action_space.low)
@@ -263,7 +265,7 @@ if __name__ == "__main__":
 
     ppo = PPO(gym_env, discrete=is_discrete)
 
-    # ppo.load_model("ppo_episode480.h5")
-    ppo.train(max_epochs=200000, save_freq=50)
+    # ppo.load_model("basic_models/ppo_episode200.h5")
+    ppo.train(max_epochs=1000, save_freq=50)
     # reward = ppo.test()
-    # print(reward)
+    # print("Total rewards: ", rewards)

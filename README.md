@@ -19,15 +19,15 @@ Implemented for Tensorflow 2.0+
 - Run: `python3 hyperparam_tune.py`
 
 ## Agents
-All agents tested using CartPole env. SAC, PPO currently work in progress / debugging.
+All agents tested using CartPole env.
 
 | Name | On/off policy | Model | Action space support |
 | --- | --- | --- | --- | 
 | [DQN](https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf) | off-policy | Dense, LSTM | discrete |
 | [DDPG](https://arxiv.org/pdf/1509.02971.pdf) | off-policy | Dense, LSTM | discrete, continuous | 
 | [AE-DDPG](https://arxiv.org/pdf/1903.00827.pdf) | off-policy | Dense | discrete, continuous | 
-| [SAC*](https://arxiv.org/pdf/1812.05905.pdf) | off-policy | Dense | continuous |
-| [PPO*](https://arxiv.org/pdf/1707.06347.pdf) | on-policy | Dense | discrete, continuous | 
+| [SAC](https://arxiv.org/pdf/1812.05905.pdf) | off-policy | Dense | continuous |
+| [PPO](https://arxiv.org/pdf/1707.06347.pdf) | on-policy | Dense | discrete, continuous | 
 
 
 ## Models
@@ -42,6 +42,6 @@ Models used to generate the demos are included in the repo, you can also find q 
 | --- | --- |
 | <img src="DDPG/gifs/test_render_basic_reward222.gif" height="200"> | <img src="DDPG/gifs/test_render_lstm_time_step5_reward500.gif" height="200"> |
 
-| AE-DDPG Basic, 500 reward |
-| --- |
-| <img src="AE-DDPG/gifs/test_render_basic_reward500.gif" height="200"> |
+| AE-DDPG Basic, 500 reward | PPO Basic, 500 reward |
+| --- | -- |
+| <img src="AE-DDPG/gifs/test_render_basic_reward500.gif" height="200"> | <img src="PPO/gifs/test_render_basic_reward500.gif" height="200"> |
