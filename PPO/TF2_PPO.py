@@ -47,15 +47,15 @@ class PPO:
             self,
             env,
             discrete=False,
-            lr=3e-4,
+            lr=1e-4,
             hidden_units=(24, 16),
             c1=1.0,
-            c2=0.0,
+            c2=0.01,
             clip_ratio=0.2,
-            gamma=0.99,
+            gamma=0.95,
+            lam=1.0,
             batch_size=64,
             n_updates=4,
-            memory_cap=100000
     ):
         self.env = env
         self.state_shape = env.observation_space.shape  # shape of observations
@@ -64,7 +64,6 @@ class PPO:
         if not discrete:
             self.action_bound = (env.action_space.high - env.action_space.low) / 2
             self.action_shift = (env.action_space.high + env.action_space.low) / 2
-        self.memory = deque(maxlen=int(memory_cap))
 
         # Define and initialize network
         self.policy = model(self.state_shape, self.action_dim, hidden_units, discrete=discrete)
@@ -77,6 +76,7 @@ class PPO:
 
         # Set hyperparameters
         self.gamma = gamma  # discount factor
+        self.lam = lam
         self.c1 = c1  # value difference coeff
         self.c2 = c2  # entropy coeff
         self.clip_ratio = clip_ratio  # for clipped surrogate
@@ -88,7 +88,7 @@ class PPO:
 
     def get_dist(self, output):
         if self.discrete:
-            dist = tfd.Categorical(output)
+            dist = tfd.Categorical(probs=output)
         else:
             std = tf.math.exp(self.policy_stdev)
             dist = tfd.Normal(loc=output, scale=std)
@@ -99,7 +99,10 @@ class PPO:
         output, value = self.policy(state)
         dist = self.get_dist(output)
 
-        log_probs = tf.reduce_sum(dist.log_prob(action))
+        log_probs = dist.log_prob(action)
+        if not self.discrete:
+            log_probs = tf.reduce_sum(log_probs, axis=-1)
+
         entropy = dist.entropy()
 
         return log_probs, entropy, value
@@ -111,15 +114,13 @@ class PPO:
 
         if self.discrete:
             action = tf.math.argmax(output, axis=-1) if test else dist.sample()
+            log_probs = dist.log_prob(action)
         else:
             action = output if test else dist.sample()
-
-        log_probs = tf.reduce_sum(dist.log_prob(action))
-
-        if not self.discrete:
+            log_probs = tf.reduce_sum(dist.log_prob(action), axis=-1)
             action = action * self.action_bound + self.action_shift
 
-        return action[0].numpy(), value[0][0], log_probs.numpy()
+        return action[0].numpy(), value[0][0], log_probs[0].numpy()
 
     def save_model(self, fn):
         self.policy.save(fn)
@@ -131,15 +132,16 @@ class PPO:
     def get_gaes(self, rewards, v_preds, next_v_preds):
         # source: https://github.com/uidilr/ppo_tf/blob/master/ppo.py#L98
         deltas = [r_t + self.gamma * v_next - v for r_t, v_next, v in zip(rewards, next_v_preds, v_preds)]
-        # calculate generative advantage estimator(lambda = 1), see ppo paper eq(11)
         gaes = copy.deepcopy(deltas)
         for t in reversed(range(len(gaes) - 1)):  # is T-1, where T is time step which run policy
-            gaes[t] = gaes[t] + self.gamma * gaes[t + 1]
+            gaes[t] = gaes[t] + self.lam * self.gamma * gaes[t + 1]
         return gaes
 
-    def learn(self, observations, actions, log_probs, rewards, gaes):
+    def learn(self, observations, actions, log_probs, next_v_preds, rewards, gaes):
         rewards = np.expand_dims(rewards, axis=-1).astype(np.float64)
-        with tf.GradientTape(persistent=True) as tape:
+        next_v_preds = np.expand_dims(next_v_preds, axis=-1).astype(np.float64)
+
+        with tf.GradientTape() as tape:
             new_log_probs, entropy, state_values = self.evaluate_actions(observations, actions)
 
             ratios = tf.exp(new_log_probs - log_probs)
@@ -148,7 +150,8 @@ class PPO:
             loss_clip = tf.minimum(tf.multiply(gaes, ratios), tf.multiply(gaes, clipped_ratios))
             loss_clip = -tf.reduce_mean(loss_clip)
 
-            vf_loss = tf.reduce_mean(tf.math.square(state_values - rewards))
+            target_values = rewards + self.gamma * next_v_preds
+            vf_loss = tf.reduce_mean(tf.math.square(state_values - target_values))
 
             entropy = -tf.reduce_mean(entropy)
             total_loss = loss_clip + self.c1 * vf_loss + self.c2 * entropy
@@ -191,7 +194,9 @@ class PPO:
 
             next_v_preds = v_preds[1:] + [0]
             gaes = self.get_gaes(rewards, v_preds, next_v_preds)
-            data = [obs, actions, log_probs, rewards, gaes]
+            gaes = np.array(gaes).astype(dtype=np.float64)
+            gaes = (gaes - gaes.mean()) / gaes.std()
+            data = [obs, actions, log_probs, next_v_preds, rewards, gaes]
 
             for i in range(self.n_updates):
                 # Sample training data
@@ -233,8 +238,8 @@ class PPO:
         cur_state, done, rewards = self.env.reset(), False, 0
         video = imageio.get_writer(filename, fps=fps)
         while not done:
-            action = self.act(cur_state, test=True)
-            next_state, reward, done, _ = self.env.step(action[0])
+            action, value, log_prob = self.act(cur_state, test=True)
+            next_state, reward, done, _ = self.env.step(action)
             cur_state = next_state
             rewards += reward
             if render:
@@ -244,7 +249,9 @@ class PPO:
 
 
 if __name__ == "__main__":
-    gym_env = gym.make("Pendulum-v0")
+    gym_env = gym.make("CartPole-v0")
+    # gym_env = gym.make("MountainCarContinuous-v0")
+    gym_env.seed(0)
     try:
         # Ensure action bound is symmetric
         assert (gym_env.action_space.high == -gym_env.action_space.low)
