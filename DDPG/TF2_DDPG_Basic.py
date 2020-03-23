@@ -96,8 +96,8 @@ class DDPG:
             lr_critic=1e-3,
             actor_units=(24, 16),
             critic_units=(24, 16),
-            noise='ou',
-            sigma=0.2,
+            noise='norm',
+            sigma=0.15,
             tau=0.125,
             gamma=0.85,
             batch_size=64,
@@ -191,7 +191,7 @@ class DDPG:
         self.summaries['critic_loss'] = np.mean(hist.history['loss'])
         self.summaries['actor_loss'] = actor_loss
 
-    def train(self, max_episodes=50, max_epochs=8000, max_steps=1000, save_freq=50):
+    def train(self, max_episodes=50, max_epochs=8000, max_steps=500, save_freq=50):
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         train_log_dir = 'logs/DDPG_basic_' + current_time
         summary_writer = tf.summary.create_file_writer(train_log_dir)
@@ -199,11 +199,6 @@ class DDPG:
         done, episode, steps, epoch, total_reward = False, 0, 0, 0, 0
         cur_state = self.env.reset()
         while episode < max_episodes or epoch < max_epochs:
-            if steps > max_steps:
-                print("episode {}, reached max steps".format(episode))
-                self.save_model("ddpg_actor_episode{}.h5".format(episode),
-                                "ddpg_critic_episode{}.h5".format(episode))
-
             if done:
                 episode += 1
                 print("episode {}: {} total reward, {} steps, {} epochs".format(
@@ -220,6 +215,11 @@ class DDPG:
                 if episode % save_freq == 0:
                     self.save_model("ddpg_actor_episode{}.h5".format(episode),
                                     "ddpg_critic_episode{}.h5".format(episode))
+
+            if steps >= max_steps:
+                print("episode {}, reached max steps".format(episode))
+                self.save_model("ddpg_actor_episode{}.h5".format(episode),
+                                "ddpg_critic_episode{}.h5".format(episode))
 
             a = self.act(cur_state)  # model determine action given state
             action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
@@ -276,8 +276,8 @@ if __name__ == "__main__":
         print('Discrete Action Space')
 
     ddpg = DDPG(gym_env, discrete=is_discrete)
-    # ddpg.load_critic("basic_models/ddpg_critic_final_episode104.h5")
-    # ddpg.load_actor("basic_models/ddpg_actor_final_episode104.h5")
+    # ddpg.load_critic("ddpg_critic_episode124.h5")
+    # ddpg.load_actor("ddpg_actor_episode124.h5")
     ddpg.train(max_episodes=1000)
     # rewards = ddpg.test()
     # print("Total rewards: ", rewards)

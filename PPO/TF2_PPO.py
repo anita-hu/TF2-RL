@@ -193,7 +193,7 @@ class PPO:
                 steps += 1
                 cur_state = next_state
 
-            if steps > max_steps:
+            if steps >= max_steps:
                 print("episode {}, reached max steps".format(episode))
                 self.save_model("ppo_episode{}.h5".format(episode))
 
