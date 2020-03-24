@@ -83,21 +83,11 @@ class DQN:
             return
 
         samples = random.sample(self.memory, self.batch_size)
-        batch_states = []
-        batch_target = []
-        for sample in samples:  # calculate target y for each sample
-            states, action, reward, new_states, done = sample
-            batch_states.append(states)
-            states = np.expand_dims(states, axis=0)
-            target = self.target_model.predict(states)[0]
-            if done:
-                target[action] = reward
-            else:
-                new_states = np.expand_dims(new_states, axis=0)
-                q_future = max(self.target_model.predict(new_states)[0])
-                target[action] = reward + q_future * self.gamma
-            batch_target.append(target)
-        hist = self.model.fit(np.array(batch_states), np.array(batch_target), epochs=1, verbose=0)
+        states, action, reward, new_states, done = map(np.asarray, zip(*samples))
+        target_qs = self.target_model.predict(states)
+        q_future = self.target_model.predict(new_states).max(axis=1)
+        target_qs[range(self.batch_size), action] = reward + (1 - done) * q_future * self.gamma
+        hist = self.model.fit(states, target_qs, epochs=1, verbose=0)
         self.summaries['loss'] = np.mean(hist.history['loss'])
 
     def target_update(self):

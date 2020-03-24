@@ -91,7 +91,7 @@ class DQN:
         batch_new_states = np.array(new_states).reshape(self.batch_size, -1)
         batch_target = self.target_model.predict(batch_states)
         q_future = self.target_model.predict(batch_new_states).max(axis=1)
-        batch_target[:, action] = reward + (1 - done) * q_future * self.gamma
+        batch_target[range(self.batch_size), action] = reward + (1 - done) * q_future * self.gamma
         hist = self.model.fit(batch_states, batch_target, epochs=1, verbose=0)
         self.summaries['loss'] = np.mean(hist.history['loss'])
 
