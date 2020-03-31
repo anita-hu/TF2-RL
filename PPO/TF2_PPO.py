@@ -150,7 +150,7 @@ class PPO:
             loss_clip = tf.reduce_mean(loss_clip)
 
             target_values = rewards + self.gamma * next_v_preds
-            vf_loss = tf.reduce_mean(0.5 * tf.math.square(state_values - target_values))
+            vf_loss = tf.reduce_mean(tf.math.square(state_values - target_values))
 
             entropy = tf.reduce_mean(entropy)
             total_loss = -loss_clip + self.c1 * vf_loss - self.c2 * entropy
