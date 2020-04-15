@@ -46,7 +46,7 @@ class PPO:
             self,
             env,
             discrete=False,
-            lr=5e-4,
+            lr=1e-3,
             hidden_units=(24, 16),
             c1=1.0,
             c2=0.01,
@@ -71,7 +71,7 @@ class PPO:
 
         # Stdev for continuous action
         if not discrete:
-            self.policy_stdev = tf.Variable(tf.zeros(self.action_dim, dtype=tf.float64), trainable=True)
+            self.policy_log_std = tf.Variable(tf.zeros(self.action_dim, dtype=tf.float64), trainable=True)
 
         # Set hyperparameters
         self.gamma = gamma  # discount factor
@@ -89,7 +89,7 @@ class PPO:
         if self.discrete:
             dist = tfd.Categorical(probs=output)
         else:
-            std = tf.math.exp(self.policy_stdev)
+            std = tf.math.exp(self.policy_log_std)
             dist = tfd.Normal(loc=output, scale=std)
 
         return dist
@@ -97,7 +97,8 @@ class PPO:
     def evaluate_actions(self, state, action):
         output, value = self.policy(state)
         dist = self.get_dist(output)
-        action = (action - self.action_shift) / self.action_bound
+        if not self.discrete:
+            action = (action - self.action_shift) / self.action_bound
 
         log_probs = dist.log_prob(action)
         if not self.discrete:
@@ -117,6 +118,7 @@ class PPO:
             log_probs = dist.log_prob(action)
         else:
             action = output if test else dist.sample()
+            action = tf.clip_by_value(action, -1, 1)
             log_probs = tf.reduce_sum(dist.log_prob(action), axis=-1)
             action = action * self.action_bound + self.action_shift
 
@@ -158,7 +160,7 @@ class PPO:
 
         train_variables = self.policy.trainable_variables
         if not self.discrete:
-            train_variables += [self.policy_stdev]
+            train_variables += [self.policy_log_std]
         grad = tape.gradient(total_loss, train_variables)  # compute gradient
         self.model_optimizer.apply_gradients(zip(grad, train_variables))
 
@@ -193,10 +195,6 @@ class PPO:
 
                 steps += 1
                 cur_state = next_state
-
-            if steps >= max_steps:
-                print("episode {}, reached max steps".format(episode))
-                self.save_model("ppo_episode{}.h5".format(episode))
 
             next_v_preds = v_preds[1:] + [0]
             gaes = self.get_gaes(rewards, v_preds, next_v_preds)
@@ -233,6 +231,10 @@ class PPO:
 
             summary_writer.flush()
 
+            if steps >= max_steps:
+                print("episode {}, reached max steps".format(episode))
+                self.save_model("ppo_episode{}.h5".format(episode))
+
             if episode % save_freq == 0:
                 self.save_model("ppo_episode{}.h5".format(episode))
 
@@ -254,7 +256,7 @@ class PPO:
 
 if __name__ == "__main__":
     gym_env = gym.make("CartPole-v1")
-    # gym_env = gym.make("MountainCarContinuous-v0")
+    # gym_env = gym.make("Pendulum-v0")
     try:
         # Ensure action bound is symmetric
         assert (gym_env.action_space.high == -gym_env.action_space.low)
