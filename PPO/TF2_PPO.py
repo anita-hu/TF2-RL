@@ -97,6 +97,7 @@ class PPO:
     def evaluate_actions(self, state, action):
         output, value = self.policy(state)
         dist = self.get_dist(output)
+        action = (action - self.action_shift) / self.action_bound
 
         log_probs = dist.log_prob(action)
         if not self.discrete:
