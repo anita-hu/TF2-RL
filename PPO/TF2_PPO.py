@@ -46,7 +46,7 @@ class PPO:
             self,
             env,
             discrete=False,
-            lr=1e-3,
+            lr=5e-4,
             hidden_units=(24, 16),
             c1=1.0,
             c2=0.01,
@@ -268,7 +268,7 @@ if __name__ == "__main__":
 
     ppo = PPO(gym_env, discrete=is_discrete)
 
-    # ppo.load_model("basic_models/ppo_episode200.h5")
-    ppo.train(max_epochs=1000, save_freq=50)
-    # reward = ppo.test()
-    # print("Total rewards: ", rewards)
+    ppo.load_model("basic_models/ppo_episode176.h5")
+    # ppo.train(max_epochs=1000, save_freq=50)
+    reward = ppo.test()
+    print("Total rewards: ", reward)
