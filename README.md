@@ -2,7 +2,7 @@
 Implemented for Tensorflow 2.0+
 
 ## New Updates!
-- PPO
+- DDPG with prioritized replay
 
 ## Future Plans
 - SAC Discrete

@@ -181,11 +181,6 @@ class DDPG:
         cur_state = self.env.reset()
         self.update_states(cur_state)  # update stored states
         while episode < max_episodes or epoch < max_epochs:
-            if steps >= max_steps:
-                print("episode {}, reached max steps".format(episode))
-                self.save_model("ddpg_actor_episode{}.h5".format(episode),
-                                "ddpg_critic_episode{}.h5".format(episode))
-
             if done:
                 episode += 1
                 print("episode {}: {} total reward, {} steps, {} epochs".format(
@@ -197,6 +192,11 @@ class DDPG:
 
                 summary_writer.flush()
                 self.noise.reset()
+
+                if steps >= max_steps:
+                    print("episode {}, reached max steps".format(episode))
+                    self.save_model("ddpg_actor_episode{}.h5".format(episode),
+                                    "ddpg_critic_episode{}.h5".format(episode))
 
                 done, cur_state, steps, total_reward = False, self.env.reset(), 0, 0
                 if episode % save_freq == 0:

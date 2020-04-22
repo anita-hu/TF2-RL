@@ -1,15 +1,16 @@
 import gym
-import random
 import imageio
 import datetime
 import numpy as np
-from collections import deque
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, Lambda, Concatenate
 from tensorflow.keras.optimizers import Adam
 
+from Prioritized_Replay import Memory
+
 # Original paper: https://arxiv.org/pdf/1509.02971.pdf
+# DDPG with PER paper: https://cardwing.github.io/files/RL_course_report.pdf
 
 tf.keras.backend.set_floatx('float64')
 
@@ -101,7 +102,7 @@ class DDPG:
             tau=0.125,
             gamma=0.85,
             batch_size=64,
-            memory_cap=100000
+            memory_cap=1000
     ):
         self.env = env
         self.state_shape = env.observation_space.shape  # shape of observations
@@ -109,7 +110,7 @@ class DDPG:
         self.discrete = discrete
         self.action_bound = (env.action_space.high - env.action_space.low) / 2 if not discrete else 1.
         self.action_shift = (env.action_space.high + env.action_space.low) / 2 if not discrete else 0.
-        self.memory = deque(maxlen=memory_cap)
+        self.memory = Memory(capacity=memory_cap)
         if noise == 'ou':
             self.noise = OrnsteinUhlenbeckNoise(mu=np.zeros(self.action_dim), sigma=sigma)
         else:
@@ -161,23 +162,33 @@ class DDPG:
         print(self.critic.summary())
 
     def remember(self, state, action, reward, next_state, done):
-        state = np.expand_dims(state, axis=0)
-        next_state = np.expand_dims(next_state, axis=0)
-        self.memory.append([state, action, reward, next_state, done])
+        action = np.squeeze(action)
+        transition = np.hstack([state, action, reward, next_state, done])
+        self.memory.store(transition)
 
     def replay(self):
         if len(self.memory) < self.batch_size:
             return
 
-        samples = random.sample(self.memory, self.batch_size)
-        s = np.array(samples).T
-        states, actions, rewards, next_states, dones = [np.vstack(s[i, :]).astype(np.float) for i in range(5)]
+        tree_idx, samples, ISWeights = self.memory.sample(self.batch_size)
+        split_shape = np.cumsum([self.state_shape[0], self.action_dim, 1, self.state_shape[0]])
+        states, actions, rewards, next_states, dones = np.hsplit(samples, split_shape)
         next_actions = self.actor_target.predict(next_states)
         q_future = self.critic_target.predict([next_states, next_actions])
         target_qs = rewards + q_future * self.gamma * (1. - dones)
 
         # train critic
-        hist = self.critic.fit([states, actions], target_qs, epochs=1, batch_size=self.batch_size, verbose=0)
+        with tf.GradientTape() as tape:
+            q_values = self.critic([states, actions])
+            td_error = q_values - target_qs
+            critic_loss = tf.reduce_mean(ISWeights * tf.math.square(td_error))
+
+        critic_grad = tape.gradient(critic_loss, self.critic.trainable_variables)  # compute critic gradient
+        self.critic_optimizer.apply_gradients(zip(critic_grad, self.critic.trainable_variables))
+
+        # update priority
+        abs_errors = tf.reduce_sum(tf.abs(td_error), axis=1)
+        self.memory.batch_update(tree_idx, abs_errors)
 
         # train actor
         with tf.GradientTape() as tape:
@@ -188,12 +199,12 @@ class DDPG:
         self.actor_optimizer.apply_gradients(zip(actor_grad, self.actor.trainable_variables))
 
         # tensorboard info
-        self.summaries['critic_loss'] = np.mean(hist.history['loss'])
+        self.summaries['critic_loss'] = critic_loss
         self.summaries['actor_loss'] = actor_loss
 
     def train(self, max_episodes=50, max_epochs=8000, max_steps=500, save_freq=50):
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        train_log_dir = 'logs/DDPG_basic_' + current_time
+        train_log_dir = 'logs/DDPG_PER_' + current_time
         summary_writer = tf.summary.create_file_writer(train_log_dir)
 
         done, episode, steps, epoch, total_reward = False, 0, 0, 0, 0
@@ -277,7 +288,7 @@ if __name__ == "__main__":
 
     ddpg = DDPG(gym_env, discrete=is_discrete)
     # ddpg.load_critic("ddpg_critic_episode124.h5")
-    # ddpg.load_actor("ddpg_actor_episode124.h5")
-    ddpg.train(max_episodes=1000)
-    # rewards = ddpg.test()
-    # print("Total rewards: ", rewards)
+    ddpg.load_actor("ddpg_actor_episode179.h5")
+    # ddpg.train(max_episodes=1000)
+    rewards = ddpg.test()
+    print("Total rewards: ", rewards)
