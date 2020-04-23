@@ -3,6 +3,7 @@ Implemented for Tensorflow 2.0+
 
 ## New Updates!
 - DDPG with prioritized replay
+- Primal-Dual DDPG for CMDP
 
 ## Future Plans
 - SAC Discrete
@@ -19,16 +20,20 @@ Implemented for Tensorflow 2.0+
 - Run: `python3 hyperparam_tune.py`
 
 ## Agents
-All agents tested using CartPole env.
+Agents tested using CartPole env.
 
 | Name | On/off policy | Model | Action space support |
 | --- | --- | --- | --- | 
 | [DQN](https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf) | off-policy | Dense, LSTM | discrete |
 | [DDPG](https://arxiv.org/pdf/1509.02971.pdf) | off-policy | Dense, LSTM | discrete, continuous | 
 | [AE-DDPG](https://arxiv.org/pdf/1903.00827.pdf) | off-policy | Dense | discrete, continuous | 
-| [SAC](https://arxiv.org/pdf/1812.05905.pdf) | off-policy | Dense | continuous |
+| [SAC:bug:](https://arxiv.org/pdf/1812.05905.pdf) | off-policy | Dense | continuous |
 | [PPO](https://arxiv.org/pdf/1707.06347.pdf) | on-policy | Dense | discrete, continuous | 
 
+#### Contrained MDP
+| Name | On/off policy | Model | Action space support |
+| --- | --- | --- | --- | 
+| [Primal-Dual DDPG](https://arxiv.org/pdf/1802.06480.pdf) | off-policy | Dense | discrete, continuous|
 
 ## Models
 Models used to generate the demos are included in the repo, you can also find q value, reward and/or loss graphs 

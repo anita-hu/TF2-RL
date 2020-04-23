@@ -1,7 +1,9 @@
 import gym
+import random
 import imageio
 import datetime
 import numpy as np
+from collections import deque
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense, Lambda, Concatenate
@@ -9,8 +11,7 @@ from tensorflow.keras.optimizers import Adam
 
 from Prioritized_Replay import Memory
 
-# Original paper: https://arxiv.org/pdf/1509.02971.pdf
-# DDPG with PER paper: https://cardwing.github.io/files/RL_course_report.pdf
+# Reference papers: https://arxiv.org/pdf/1802.06480.pdf, https://arxiv.org/pdf/1801.05757.pdf
 
 tf.keras.backend.set_floatx('float64')
 
@@ -88,21 +89,24 @@ class NormalNoise:
         pass
 
 
-class DDPG:
+class PD_DDPG:
     def __init__(
             self,
             env,
             discrete=False,
-            lr_actor=1e-5,
+            use_priority=True,
+            lr_actor=1e-4,
             lr_critic=1e-3,
+            lr_lam=1e-5,
             actor_units=(24, 16),
             critic_units=(24, 16),
             noise='norm',
+            cost_const=1,
             sigma=0.15,
             tau=0.125,
             gamma=0.85,
             batch_size=64,
-            memory_cap=1000
+            memory_cap=100000
     ):
         self.env = env
         self.state_shape = env.observation_space.shape  # shape of observations
@@ -110,7 +114,8 @@ class DDPG:
         self.discrete = discrete
         self.action_bound = (env.action_space.high - env.action_space.low) / 2 if not discrete else 1.
         self.action_shift = (env.action_space.high + env.action_space.low) / 2 if not discrete else 0.
-        self.memory = Memory(capacity=memory_cap)
+        self.use_priority = use_priority
+        self.memory = Memory(capacity=memory_cap) if use_priority else deque(maxlen=memory_cap)
         if noise == 'ou':
             self.noise = OrnsteinUhlenbeckNoise(mu=np.zeros(self.action_dim), sigma=sigma)
         else:
@@ -122,17 +127,30 @@ class DDPG:
         self.actor_optimizer = Adam(learning_rate=lr_actor)
         update_target_weights(self.actor, self.actor_target, tau=1.)
 
-        # Define and initialize Critic network
-        self.critic = critic(self.state_shape, self.action_dim, critic_units)
-        self.critic_target = critic(self.state_shape, self.action_dim, critic_units)
-        self.critic_optimizer = Adam(learning_rate=lr_critic)
-        self.critic.compile(loss="mean_squared_error", optimizer=self.critic_optimizer)
-        update_target_weights(self.critic, self.critic_target, tau=1.)
+        # Define and initialize Critic networks
+        self.reward_critic = critic(self.state_shape, self.action_dim, critic_units)
+        self.reward_critic_target = critic(self.state_shape, self.action_dim, critic_units)
+        self.reward_critic_optimizer = Adam(learning_rate=lr_critic)
+        self.reward_critic.compile(loss="mean_squared_error", optimizer=self.reward_critic_optimizer)
+        update_target_weights(self.reward_critic, self.reward_critic_target, tau=1.)
+
+        self.cost_critic = critic(self.state_shape, self.action_dim, critic_units)
+        self.cost_critic_target = critic(self.state_shape, self.action_dim, critic_units)
+        self.cost_critic_optimizer = Adam(learning_rate=lr_critic)
+        self.cost_critic.compile(loss="mean_squared_error", optimizer=self.cost_critic_optimizer)
+        update_target_weights(self.cost_critic, self.cost_critic_target, tau=1.)
+
+        # Dual variable
+        self.lam = tf.Variable(0.0, dtype=tf.float64)
+        self.lr_lam = lr_lam
 
         # Set hyperparameters
         self.gamma = gamma  # discount factor
         self.tau = tau  # target model update
         self.batch_size = batch_size
+        self.cost_constraint = cost_const  # long tern cost <= d
+        if use_priority:
+            self.phi = 0.6
 
         # Tensorboard
         self.summaries = {}
@@ -143,68 +161,109 @@ class DDPG:
         a += self.noise() * add_noise * self.action_bound
         a = tf.clip_by_value(a, -self.action_bound + self.action_shift, self.action_bound + self.action_shift)
 
-        self.summaries['q_val'] = self.critic.predict([state, a])[0][0]
+        self.summaries['reward_q_val'] = self.reward_critic.predict([state, a])[0][0]
+        self.summaries['cost_q_val'] = self.cost_critic.predict([state, a])[0][0]
 
         return a
 
-    def save_model(self, a_fn, c_fn):
+    def save_model(self, a_fn, reward_c_fn, cost_c_fn):
         self.actor.save(a_fn)
-        self.critic.save(c_fn)
+        self.reward_critic.save(reward_c_fn)
+        self.cost_critic.save(cost_c_fn)
 
     def load_actor(self, a_fn):
         self.actor.load_weights(a_fn)
         self.actor_target.load_weights(a_fn)
         print(self.actor.summary())
 
-    def load_critic(self, c_fn):
-        self.critic.load_weights(c_fn)
-        self.critic_target.load_weights(c_fn)
-        print(self.critic.summary())
+    def load_critic(self, reward_c_fn, cost_c_fn):
+        self.reward_critic.load_weights(reward_c_fn)
+        self.reward_critic_target.load_weights(reward_c_fn)
+        self.cost_critic.load_weights(cost_c_fn)
+        self.cost_critic_target.load_weights(cost_c_fn)
+        print(self.reward_critic.summary())
 
-    def remember(self, state, action, reward, next_state, done):
-        action = np.squeeze(action)
-        transition = np.hstack([state, action, reward, next_state, done])
-        self.memory.store(transition)
+    def remember(self, state, action, reward, cost, next_state, done):
+        if self.use_priority:
+            action = np.squeeze(action)
+            transition = np.hstack([state, action, reward, cost, next_state, done])
+            self.memory.store(transition)
+        else:
+            state = np.expand_dims(state, axis=0)
+            next_state = np.expand_dims(next_state, axis=0)
+            self.memory.append([state, action, reward, cost, next_state, done])
 
     def replay(self):
         if len(self.memory) < self.batch_size:
             return
 
-        tree_idx, samples, ISWeights = self.memory.sample(self.batch_size)
-        split_shape = np.cumsum([self.state_shape[0], self.action_dim, 1, self.state_shape[0]])
-        states, actions, rewards, next_states, dones = np.hsplit(samples, split_shape)
+        if self.use_priority:
+            tree_idx, samples, ISWeights = self.memory.sample(self.batch_size)
+            split_shape = np.cumsum([self.state_shape[0], self.action_dim, 1, 1, self.state_shape[0]])
+            states, actions, rewards, costs, next_states, dones = np.hsplit(samples, split_shape)
+        else:
+            ISWeights = 1.0
+            samples = random.sample(self.memory, self.batch_size)
+            s = np.array(samples).T
+            states, actions, rewards, costs, next_states, dones = [np.vstack(s[i, :]).astype(np.float) for i in range(6)]
+
         next_actions = self.actor_target.predict(next_states)
-        q_future = self.critic_target.predict([next_states, next_actions])
-        target_qs = rewards + q_future * self.gamma * (1. - dones)
+        reward_q_future = self.reward_critic_target.predict([next_states, next_actions])
+        reward_target_qs = rewards + reward_q_future * self.gamma * (1. - dones)
+
+        cost_q_future = self.cost_critic_target.predict([next_states, next_actions])
+        cost_target_qs = costs + cost_q_future * self.gamma * (1. - dones)
 
         # train critic
         with tf.GradientTape() as tape:
-            q_values = self.critic([states, actions])
-            td_error = q_values - target_qs
-            critic_loss = tf.reduce_mean(ISWeights * tf.math.square(td_error))
+            q_values = self.reward_critic([states, actions])
+            reward_td_error = q_values - reward_target_qs
+            reward_critic_loss = tf.reduce_mean(ISWeights * tf.math.square(reward_td_error))
 
-        critic_grad = tape.gradient(critic_loss, self.critic.trainable_variables)  # compute critic gradient
-        self.critic_optimizer.apply_gradients(zip(critic_grad, self.critic.trainable_variables))
+        reward_critic_grad = tape.gradient(reward_critic_loss, self.reward_critic.trainable_variables)
+        self.reward_critic_optimizer.apply_gradients(zip(reward_critic_grad, self.reward_critic.trainable_variables))
 
-        # update priority
-        abs_errors = tf.reduce_sum(tf.abs(td_error), axis=1)
-        self.memory.batch_update(tree_idx, abs_errors)
+        with tf.GradientTape() as tape:
+            q_values = self.cost_critic([states, actions])
+            cost_td_error = q_values - cost_target_qs
+            cost_critic_loss = tf.reduce_mean(ISWeights * tf.math.square(cost_td_error))
+
+        cost_critic_grad = tape.gradient(cost_critic_loss, self.cost_critic.trainable_variables)
+        self.cost_critic_optimizer.apply_gradients(zip(cost_critic_grad, self.cost_critic.trainable_variables))
 
         # train actor
-        with tf.GradientTape() as tape:
+        with tf.GradientTape(persistent=True) as tape:
             actions = self.actor(states)
-            actor_loss = -tf.reduce_mean(self.critic([states, actions]))
+            cost_q = self.cost_critic([states, actions])
+            reward_q = self.reward_critic([states, actions])
+            actor_loss = -tf.reduce_mean(reward_q - self.lam * cost_q)
 
         actor_grad = tape.gradient(actor_loss, self.actor.trainable_variables)  # compute actor gradient
         self.actor_optimizer.apply_gradients(zip(actor_grad, self.actor.trainable_variables))
 
+        # update priority based on eq (8) in https://arxiv.org/pdf/1801.05757.pdf
+        if self.use_priority:
+            abs_errors = tf.reduce_sum(tf.abs(reward_td_error) + tf.abs(cost_td_error), axis=1)
+            action_grad = tape.gradient(actor_loss, actions)
+            mean_abs_grad = tf.reduce_mean(tf.abs(action_grad), axis=1)
+            priority = self.phi * abs_errors + (1 - self.phi) * mean_abs_grad
+            self.memory.batch_update(tree_idx, priority)
+
+        # update dual variable
+        lam_update = tf.reduce_mean(cost_q - self.cost_constraint)
+        self.lam.assign_add(self.lr_lam * lam_update)
+        self.lam.assign(tf.maximum(self.lam, 0.0))
+
+
         # tensorboard info
-        self.summaries['critic_loss'] = critic_loss
+        self.summaries['reward_critic_loss'] = reward_critic_loss
+        self.summaries['cost_critic_loss'] = cost_critic_loss
         self.summaries['actor_loss'] = actor_loss
+        self.summaries['lam_update'] = lam_update
 
     def train(self, max_episodes=50, max_epochs=8000, max_steps=500, save_freq=50):
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        train_log_dir = 'logs/DDPG_PER_' + current_time
+        train_log_dir = 'logs/Primal_Dual_DDPG_' + current_time
         summary_writer = tf.summary.create_file_writer(train_log_dir)
 
         done, episode, steps, epoch, total_reward = False, 0, 0, 0, 0
@@ -225,22 +284,29 @@ class DDPG:
                 if steps >= max_steps:
                     print("episode {}, reached max steps".format(episode))
                     self.save_model("ddpg_actor_episode{}.h5".format(episode),
-                                    "ddpg_critic_episode{}.h5".format(episode))
+                                    "ddpg_reward_critic_episode{}.h5".format(episode),
+                                    "ddpg_cost_critic_episode{}.h5".format(episode),)
 
                 done, cur_state, steps, total_reward = False, self.env.reset(), 0, 0
                 if episode % save_freq == 0:
                     self.save_model("ddpg_actor_episode{}.h5".format(episode),
-                                    "ddpg_critic_episode{}.h5".format(episode))
+                                    "ddpg_reward_critic_episode{}.h5".format(episode),
+                                    "ddpg_cost_critic_episode{}.h5".format(episode),)
 
             a = self.act(cur_state)  # model determine action given state
             action = np.argmax(a) if self.discrete else a[0]  # post process for discrete action space
             next_state, reward, done, _ = self.env.step(action)  # perform action on env
+            self.env.render()
 
-            self.remember(cur_state, a, reward, next_state, done)  # add to memory
+            # Define cost for CartPole based on x pos, x pos values range from (-2.4, 2.4)
+            cost = abs(next_state[0])
+
+            self.remember(cur_state, a, reward, cost, next_state, done)  # add to memory
             self.replay()  # train models through memory replay
 
             update_target_weights(self.actor, self.actor_target, tau=self.tau)  # iterates target model
-            update_target_weights(self.critic, self.critic_target, tau=self.tau)
+            update_target_weights(self.reward_critic, self.reward_critic_target, tau=self.tau)
+            update_target_weights(self.cost_critic, self.cost_critic_target, tau=self.tau)
 
             cur_state = next_state
             total_reward += reward
@@ -251,14 +317,20 @@ class DDPG:
             with summary_writer.as_default():
                 if len(self.memory) > self.batch_size:
                     tf.summary.scalar('Loss/actor_loss', self.summaries['actor_loss'], step=epoch)
-                    tf.summary.scalar('Loss/critic_loss', self.summaries['critic_loss'], step=epoch)
+                    tf.summary.scalar('Loss/reward_critic_loss', self.summaries['reward_critic_loss'], step=epoch)
+                    tf.summary.scalar('Loss/cost_critic_loss', self.summaries['cost_critic_loss'], step=epoch)
+                    tf.summary.scalar('Loss/lam_update', self.summaries['lam_update'], step=epoch)
                 tf.summary.scalar('Main/step_reward', reward, step=epoch)
-                tf.summary.scalar('Stats/q_val', self.summaries['q_val'], step=epoch)
+                tf.summary.scalar('Main/step_cost', cost, step=epoch)
+                tf.summary.scalar('Stats/reward_q_val', self.summaries['reward_q_val'], step=epoch)
+                tf.summary.scalar('Stats/cost_q_val', self.summaries['cost_q_val'], step=epoch)
+                tf.summary.scalar('Stats/lambda', self.lam.numpy(), step=epoch)
 
             summary_writer.flush()
 
         self.save_model("ddpg_actor_final_episode{}.h5".format(episode),
-                        "ddpg_critic_final_episode{}.h5".format(episode))
+                        "ddpg_reward_critic_final_episode{}.h5".format(episode),
+                        "ddpg_cost_critic_final_episode{}.h5".format(episode),)
 
     def test(self, render=True, fps=30, filename='test_render.mp4'):
         cur_state, done, rewards = self.env.reset(), False, 0
@@ -276,7 +348,7 @@ class DDPG:
 
 
 if __name__ == "__main__":
-    gym_env = gym.make("CartPole-v1")
+    gym_env = gym.make('CartPole-v0')
     try:
         # Ensure action bound is symmetric
         assert (gym_env.action_space.high == -gym_env.action_space.low)
@@ -286,9 +358,8 @@ if __name__ == "__main__":
         is_discrete = True
         print('Discrete Action Space')
 
-    ddpg = DDPG(gym_env, discrete=is_discrete)
-    # ddpg.load_critic("ddpg_critic_episode124.h5")
-    ddpg.load_actor("ddpg_actor_episode179.h5")
-    # ddpg.train(max_episodes=1000)
-    rewards = ddpg.test()
-    print("Total rewards: ", rewards)
+    ddpg = PD_DDPG(gym_env, discrete=is_discrete)
+    # ddpg.load_actor("ddpg_actor_episode124.h5")
+    ddpg.train(max_episodes=1000)
+    # rewards = ddpg.test()
+    # print("Total rewards: ", rewards)
