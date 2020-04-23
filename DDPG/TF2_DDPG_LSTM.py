@@ -16,30 +16,25 @@ from TF2_DDPG_Basic import OrnsteinUhlenbeckNoise, NormalNoise
 tf.keras.backend.set_floatx('float64')
 
 
-def actor(input_shape, action_dim, action_bound, action_shift, units=(24, 16), num_actions=1):
+def actor(input_shape, action_dim, action_bound, action_shift, units=(24, 16)):
     states = Input(shape=input_shape)
     x = LSTM(units[0], name="state_lstm", activation="tanh")(states)
     for index in range(1, len(units)):
         x = Dense(units[index], name="fc{}".format(index), activation='relu')(x)
 
-    outputs = []  # for loop for discrete-continuous action space
-    for i in range(num_actions):
-        unscaled_output = Dense(action_dim, name="output{}".format(i), activation='relu')(x)
-        scalar = action_bound * np.ones(action_dim)
-        output = Lambda(lambda op: op * scalar)(unscaled_output)
-        if np.sum(action_shift) != 0:
-            output = Lambda(lambda op: op + action_shift)(output)  # for action range not centered at zero
-        outputs.append(output)
+    unscaled_output = Dense(action_dim, name="output", activation='relu')(x)
+    scalar = action_bound * np.ones(action_dim)
+    output = Lambda(lambda op: op * scalar)(unscaled_output)
+    if np.sum(action_shift) != 0:
+        output = Lambda(lambda op: op + action_shift)(output)  # for action range not centered at zero
 
-    model = Model(inputs=states, outputs=outputs)
+    model = Model(inputs=states, outputs=output)
 
     return model
 
 
-def critic(input_shape, action_dim, units=(24, 16), num_actions=1):
-    inputs = [Input(shape=input_shape)]
-    for i in range(num_actions):  # for loop for discrete-continuous action space
-        inputs.append(Input(shape=(action_dim,)))
+def critic(input_shape, action_dim, units=(24, 16)):
+    inputs = [Input(shape=input_shape), Input(shape=(action_dim,))]
     state_features = LSTM(units[0], name="state_lstm", activation="tanh")(inputs[0])
     concat = Concatenate(axis=-1)([state_features]+inputs[1:])
     x = Dense(units[1], name="fc1", activation='relu')(concat)
@@ -174,7 +169,7 @@ class DDPG:
 
     def train(self, max_episodes=50, max_epochs=8000, max_steps=500, save_freq=50):
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        train_log_dir = 'logs/DDPG_lstm/' + current_time
+        train_log_dir = 'logs/DDPG_lstm_' + current_time
         summary_writer = tf.summary.create_file_writer(train_log_dir)
 
         done, episode, steps, epoch, total_reward = False, 0, 0, 0, 0

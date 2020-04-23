@@ -16,30 +16,25 @@ from Prioritized_Replay import Memory
 tf.keras.backend.set_floatx('float64')
 
 
-def actor(state_shape, action_dim, action_bound, action_shift, units=(400, 300), num_actions=1):
+def actor(state_shape, action_dim, action_bound, action_shift, units=(400, 300)):
     state = Input(shape=state_shape)
     x = Dense(units[0], name="L0", activation='relu')(state)
     for index in range(1, len(units)):
         x = Dense(units[index], name="L{}".format(index), activation='relu')(x)
 
-    outputs = []  # for loop for discrete-continuous action space
-    for i in range(num_actions):
-        unscaled_output = Dense(action_dim, name="Out{}".format(i), activation='tanh')(x)
-        scalar = action_bound * np.ones(action_dim)
-        output = Lambda(lambda op: op * scalar)(unscaled_output)
-        if np.sum(action_shift) != 0:
-            output = Lambda(lambda op: op + action_shift)(output)  # for action range not centered at zero
-        outputs.append(output)
+    unscaled_output = Dense(action_dim, name="Out", activation='tanh')(x)
+    scalar = action_bound * np.ones(action_dim)
+    output = Lambda(lambda op: op * scalar)(unscaled_output)
+    if np.sum(action_shift) != 0:
+        output = Lambda(lambda op: op + action_shift)(output)  # for action range not centered at zero
 
-    model = Model(inputs=state, outputs=outputs)
+    model = Model(inputs=state, outputs=output)
 
     return model
 
 
-def critic(state_shape, action_dim, units=(48, 24), num_actions=1):
-    inputs = [Input(shape=state_shape)]
-    for i in range(num_actions):  # for loop for discrete-continuous action space
-        inputs.append(Input(shape=(action_dim,)))
+def critic(state_shape, action_dim, units=(48, 24)):
+    inputs = [Input(shape=state_shape), Input(shape=(action_dim,))]
     concat = Concatenate(axis=-1)(inputs)
     x = Dense(units[0], name="L0", activation='relu')(concat)
     for index in range(1, len(units)):
@@ -94,8 +89,8 @@ class PD_DDPG:
             self,
             env,
             discrete=False,
-            use_priority=True,
-            lr_actor=1e-4,
+            use_priority=False,
+            lr_actor=1e-5,
             lr_critic=1e-3,
             lr_lam=1e-5,
             actor_units=(24, 16),
@@ -253,7 +248,6 @@ class PD_DDPG:
         lam_update = tf.reduce_mean(cost_q - self.cost_constraint)
         self.lam.assign_add(self.lr_lam * lam_update)
         self.lam.assign(tf.maximum(self.lam, 0.0))
-
 
         # tensorboard info
         self.summaries['reward_critic_loss'] = reward_critic_loss

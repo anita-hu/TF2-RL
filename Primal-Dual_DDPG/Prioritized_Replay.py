@@ -80,8 +80,8 @@ class Memory(object):  # stored as ( s, a, r, s_ ) in SumTree
     https://github.com/jaara/AI-blog/blob/master/Seaquest-DDQN-PER.py
     """
     epsilon = 0.01  # small amount to avoid zero priority
-    alpha = 0.7  # [0~1] convert the importance of TD error to priority
-    beta = 0.5  # importance-sampling, from initial value increasing to 1
+    alpha = 0.6  # [0~1] convert the importance of TD error to priority
+    beta = 0.4  # importance-sampling, from initial value increasing to 1
     beta_increment_per_sampling = 0.001
     abs_err_upper = 1.  # clipped abs error
 
